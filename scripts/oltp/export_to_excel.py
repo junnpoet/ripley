@@ -22,7 +22,8 @@ DB_USER = os.getenv("MYSQL_USER", "ripley_user")
 DB_PASS = os.getenv("MYSQL_PASSWORD", "ripley_pass")
 DB_NAME = os.getenv("MYSQL_DATABASE", "ripley_oltp")
 
-OUTPUT_DIR = Path("exports")
+ROOT_DIR = Path(__file__).resolve().parents[2]
+OUTPUT_DIR = ROOT_DIR / "exports"
 OUTPUT_FILE = OUTPUT_DIR / f"{DB_NAME}_data.xlsx"
 
 

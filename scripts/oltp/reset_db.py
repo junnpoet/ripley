@@ -17,7 +17,8 @@ DB_PORT = int(os.getenv("MYSQL_PORT", "3306"))
 DB_USER = os.getenv("MYSQL_USER", "ripley_user")
 DB_PASS = os.getenv("MYSQL_PASSWORD", "ripley_pass")
 DB_NAME = os.getenv("MYSQL_DATABASE", "ripley_oltp")
-SCHEMA_FILE = Path("database/oltp/01_schema.sql")
+ROOT_DIR = Path(__file__).resolve().parents[2]
+SCHEMA_FILE = ROOT_DIR / "database" / "oltp" / "01_schema.sql"
 
 
 def main():

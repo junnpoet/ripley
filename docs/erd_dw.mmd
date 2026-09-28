@@ -1,0 +1,148 @@
+erDiagram
+    %% =========================================================================
+    %% DATA WAREHOUSE RIPLEY (ripley_dw) - MODELO CONSTELACIÓN DE HECHOS
+    %% Metodología Ralph Kimball: 2 Tablas de Hechos + 8 Dimensiones Conformes
+    %% =========================================================================
+
+    %% Relaciones para FACT_VENTAS
+    DIM_FECHA ||--o{ FACT_VENTAS : "registra"
+    DIM_HORA ||--o{ FACT_VENTAS : "marca"
+    DIM_TIENDA ||--o{ FACT_VENTAS : "origina"
+    DIM_PRODUCTO ||--o{ FACT_VENTAS : "vende"
+    DIM_CAJA ||--o{ FACT_VENTAS : "procesa"
+    DIM_PERSONAL ||--o{ FACT_VENTAS : "despacha"
+    DIM_MEDIO_PAGO ||--o{ FACT_VENTAS : "liquida"
+    DIM_CLIENTE ||--o{ FACT_VENTAS : "adquiere"
+
+    %% Relaciones para FACT_AFLUENCIA_TIENDA (Dimensiones Conformes Compartidas)
+    DIM_FECHA ||--o{ FACT_AFLUENCIA_TIENDA : "ocurre_en"
+    DIM_HORA ||--o{ FACT_AFLUENCIA_TIENDA : "durante"
+    DIM_TIENDA ||--o{ FACT_AFLUENCIA_TIENDA : "afora"
+
+    %% -------------------------------------------------------------------------
+    %% 1. DIMENSIONES CONFORMES
+    %% -------------------------------------------------------------------------
+
+    DIM_FECHA {
+        int id_fecha PK "YYYYMMDD (-1 Comodin)"
+        date fecha UK
+        smallint anio
+        tinyint trimestre
+        tinyint mes
+        string nombre_mes
+        tinyint dia
+        string nombre_dia
+        tinyint numero_dia_semana
+        boolean es_fin_de_semana
+        boolean es_feriado
+        string temporada_comercial
+    }
+
+    DIM_HORA {
+        int id_hora PK "HHMM (-1 Comodin)"
+        tinyint hora_entera
+        tinyint minuto
+        string franja_horaria
+        string tipo_horario "Hora Pico / Normal / Valle"
+        string turno "Mañana / Tarde / Noche"
+    }
+
+    DIM_TIENDA {
+        int id_tienda PK "Surrogate Key (-1 Comodin)"
+        string codigo_tienda UK "Natural Key"
+        string nombre_tienda
+        string formato_tienda
+        string centro_comercial
+        string departamento
+        string provincia
+        string distrito
+        int aforo_maximo
+        decimal superficie_m2
+        int total_cajas_instaladas
+    }
+
+    DIM_PRODUCTO {
+        int id_producto PK "Surrogate Key (-1 Comodin)"
+        string sku UK "Natural Key"
+        string nombre_producto
+        string marca
+        boolean marca_propia
+        string categoria
+        string subcategoria
+        string departamento_comercial
+        decimal precio_lista
+    }
+
+    DIM_CAJA {
+        int id_caja PK "Surrogate Key (-1 Comodin)"
+        string codigo_caja UK "Natural Key"
+        tinyint numero_piso
+        string zona_caja
+        string tipo_caja "Tradicional / Rapida / Self-Checkout"
+        string estado_caja
+    }
+
+    DIM_PERSONAL {
+        int id_empleado PK "Surrogate Key (-1 Comodin)"
+        string codigo_empleado UK "DNI / Planilla"
+        string nombre_completo
+        string cargo
+        string turno_programado
+        string tipo_contrato
+    }
+
+    DIM_MEDIO_PAGO {
+        int id_medio_pago PK "Surrogate Key (-1 Comodin)"
+        string tipo_medio_pago
+        string canal_pago
+        boolean es_tarjeta_ripley
+        string emisor_financiero
+    }
+
+    DIM_CLIENTE {
+        int id_cliente PK "Surrogate Key (-1 Comodin)"
+        string codigo_cliente UK "Hash DNI / Codigo Socio"
+        string tipo_cliente "Fidelizado / No Fidelizado"
+        string segmento_fidelidad "Silver / Gold / Black"
+        string rango_edad
+        string genero
+    }
+
+    %% -------------------------------------------------------------------------
+    %% 2. TABLAS DE HECHOS (FACT TABLES)
+    %% -------------------------------------------------------------------------
+
+    FACT_VENTAS {
+        bigint id_hecho_venta PK
+        int id_fecha FK
+        int id_hora FK
+        int id_tienda FK
+        int id_producto FK
+        int id_caja FK
+        int id_empleado FK
+        int id_medio_pago FK
+        int id_cliente FK
+        string numero_ticket "Degenerate Dimension"
+        int cantidad_unidades
+        decimal precio_unitario_venta
+        decimal monto_descuento
+        decimal subtotal_neto
+        decimal monto_igv
+        decimal monto_total_venta
+        decimal costo_total_linea
+        decimal margen_bruto
+        int tiempo_espera_cola_seg
+        int tiempo_atencion_caja_seg
+    }
+
+    FACT_AFLUENCIA_TIENDA {
+        bigint id_hecho_afluencia PK
+        int id_fecha FK
+        int id_hora FK
+        int id_tienda FK
+        int cantidad_personas_ingreso
+        int cantidad_personas_salida
+        int aforo_promedio_ocupado
+        decimal porcentaje_saturacion_aforo
+        int cajas_activas_operando
+    }
