@@ -56,7 +56,7 @@ make help
 ### Comandos de Infraestructura Docker
 | Comando | Acción |
 | :--- | :--- |
-| `make db-up` | Levanta el contenedor MySQL en segundo plano (`sudo docker compose up -d`). |
+| `make db-up` | Levanta el contenedor MySQL en segundo plano (`docker compose up -d`). |
 | `make db-down` | Detiene y remueve el contenedor MySQL. |
 | `make db-ps` | Consulta el estado y salud del contenedor. |
 | `make db-logs` | Visualiza los logs en tiempo real de MySQL. |
@@ -79,6 +79,13 @@ make help
 | `make dw-export` | **Exporta las 10 tablas DW** a `exports/ripley_dw_data.xlsx`. |
 
 *(Nota: Los comandos `make db-reset`, `make seed-data` y `make export-excel` se mantienen como alias funcionales de OLTP por retrocompatibilidad).*
+
+> **Soporte Multiplataforma (Linux / Windows):**
+> El `Makefile` detecta automáticamente el sistema operativo:
+> * En **Linux / macOS**, utiliza las rutas estándar del entorno virtual (`.venv/bin/python3`) y `docker` directo (requiere que el usuario pertenezca al grupo `docker`).
+> * En **Windows Nativo**, adapta las rutas del entorno virtual (`.venv\Scripts\python.exe`) y los comandos de limpieza vía Python. Para ejecutar `make` en Windows, se puede instalar mediante `winget install ezwinports.make` o `choco install make`.
+
+
 
 ---
 

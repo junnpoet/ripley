@@ -1,6 +1,25 @@
 .DEFAULT_GOAL := help
-PYTHON := .venv/bin/python3
-PIP := .venv/bin/pip
+
+# -----------------------------------------------------------------------------
+# DETECCIÓN DE SISTEMA OPERATIVO Y CONFIGURACIÓN MULTIPLATAFORMA
+# -----------------------------------------------------------------------------
+ifeq ($(OS),Windows_NT)
+    # Entorno Windows Nativo (CMD / PowerShell)
+    PYTHON_SYS := python
+    BIN_DIR    := .venv\Scripts
+    PYTHON     := $(BIN_DIR)\python.exe
+    PIP        := $(BIN_DIR)\pip.exe
+    CLEAN_CMD  := $(PYTHON_SYS) -c "import shutil, glob, os; [shutil.rmtree(p, ignore_errors=True) for p in ['.venv', '__pycache__'] + glob.glob('scripts/**/__pycache__', recursive=True)]"
+else
+    # Entornos Unix (Linux / macOS / WSL)
+    PYTHON_SYS := python3
+    BIN_DIR    := .venv/bin
+    PYTHON     := $(BIN_DIR)/python3
+    PIP        := $(BIN_DIR)/pip
+    CLEAN_CMD  := rm -rf .venv __pycache__ scripts/__pycache__ scripts/oltp/__pycache__ scripts/dw/__pycache__
+endif
+
+DOCKER ?= docker
 
 .PHONY: help venv clean \
         db-up db-down db-ps db-logs db-shell db-shell-dw db-root \
@@ -40,35 +59,35 @@ venv: .venv/touchfile
 
 .venv/touchfile: requirements.txt
 	@echo "📦 Configurando entorno virtual Python..."
-	@test -d .venv || python3 -m venv .venv
+	@$(PYTHON_SYS) -c "import os, venv; os.path.isdir('.venv') or venv.create('.venv', with_pip=True)"
 	@$(PIP) install --quiet --upgrade pip
 	@$(PIP) install --quiet -r requirements.txt
-	@touch .venv/touchfile
+	@$(PYTHON_SYS) -c "import pathlib; pathlib.Path('.venv/touchfile').touch()"
 	@echo "✅ Entorno virtual listo en .venv"
 
 # -----------------------------------------------------------------------------
 # INFRAESTRUCTURA DOCKER
 # -----------------------------------------------------------------------------
 db-up:
-	sudo docker compose up -d
+	$(DOCKER) compose up -d
 
 db-down:
-	sudo docker compose down
+	$(DOCKER) compose down
 
 db-ps:
-	sudo docker compose ps
+	$(DOCKER) compose ps
 
 db-logs:
-	sudo docker compose logs -f mysql-oltp
+	$(DOCKER) compose logs -f mysql-oltp
 
 db-shell:
-	sudo docker compose exec -it mysql-oltp mysql -u ripley_user -pripley_pass ripley_oltp
+	$(DOCKER) compose exec -it mysql-oltp mysql -u ripley_user -pripley_pass ripley_oltp
 
 db-shell-dw:
-	sudo docker compose exec -it mysql-oltp mysql -u ripley_user -pripley_pass ripley_dw
+	$(DOCKER) compose exec -it mysql-oltp mysql -u ripley_user -pripley_pass ripley_dw
 
 db-root:
-	sudo docker compose exec -it mysql-oltp mysql -u root -prootpassword
+	$(DOCKER) compose exec -it mysql-oltp mysql -u root -prootpassword
 
 # -----------------------------------------------------------------------------
 # BASE DE DATOS TRANSACCIONAL (OLTP)
@@ -103,5 +122,5 @@ dw-export: venv
 # LIMPIEZA
 # -----------------------------------------------------------------------------
 clean:
-	rm -rf .venv __pycache__ scripts/__pycache__ scripts/oltp/__pycache__ scripts/dw/__pycache__
+	@$(CLEAN_CMD)
 	@echo "🧹 Limpieza completada."
