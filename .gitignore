@@ -1,0 +1,16 @@
+# Entornos virtuales Python
+.venv/
+venv/
+ENV/
+__pycache__/
+*.pyc
+
+# Variables de entorno con credenciales
+.env
+
+# Archivos de exportación generados
+exports/*.xlsx
+
+# Persistencia local o temporales
+.DS_Store
+*.swp

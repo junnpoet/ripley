@@ -1,0 +1,256 @@
+erDiagram
+    UBIGEO ||--o{ TIENDA : "ubica"
+    TIENDA ||--|{ CAJA_POS : "contiene"
+    TIENDA ||--o{ EMPLEADO : "emplea"
+    TIENDA ||--o{ INVENTARIO_TIENDA : "custodia"
+    TIENDA ||--o{ COMPROBANTE_PAGO : "emite"
+    TIENDA ||--|{ ZONA_TIENDA : "delimita"
+
+    ROL_EMPLEADO ||--o{ EMPLEADO : "clasifica"
+    TURNO_TRABAJO ||--o{ ASIGNACION_CAJA : "define"
+    CAJA_POS ||--o{ ASIGNACION_CAJA : "opera"
+    EMPLEADO ||--o{ ASIGNACION_CAJA : "atiende"
+    ASIGNACION_CAJA ||--o{ COMPROBANTE_PAGO : "autoriza"
+
+    LINEA_COMERCIAL ||--|{ CATEGORIA : "agrupa"
+    CATEGORIA ||--|{ SUBCATEGORIA : "divide"
+    SUBCATEGORIA ||--o{ PRODUCTO : "contiene"
+    MARCA ||--o{ PRODUCTO : "respalda"
+    PROVEEDOR ||--o{ PRODUCTO : "suministra"
+
+    PRODUCTO ||--o{ INVENTARIO_TIENDA : "almacena"
+    PRODUCTO ||--o{ DETALLE_COMPROBANTE : "incluido_en"
+
+    TIPO_DOCUMENTO ||--o{ CLIENTE : "valida"
+    TIPO_CLIENTE ||--o{ CLIENTE : "segmenta"
+    CLIENTE ||--o{ COMPROBANTE_PAGO : "adquiere"
+
+    EMPLEADO ||--o{ COMPROBANTE_PAGO : "procesa"
+    CAJA_POS ||--o{ COMPROBANTE_PAGO : "registra"
+    COMPROBANTE_PAGO ||--|{ DETALLE_COMPROBANTE : "compuesto_por"
+    COMPROBANTE_PAGO ||--|{ PAGO_COMPROBANTE : "financiado_con"
+    METODO_PAGO ||--o{ PAGO_COMPROBANTE : "liquida"
+
+    ZONA_TIENDA ||--|{ DISPOSITIVO_SENSOR : "monitorea"
+    DISPOSITIVO_SENSOR ||--o{ LOG_AFLUENCIA_IOT : "transmite"
+
+    UBIGEO {
+        string id_ubigeo PK
+        string departamento
+        string provincia
+        string distrito
+    }
+
+    TIENDA {
+        int id_tienda PK
+        string codigo_tienda
+        string nombre
+        string direccion
+        string id_ubigeo FK
+        decimal superficie_m2
+        int aforo_maximo
+        string estado
+    }
+
+    CAJA_POS {
+        int id_caja PK
+        int id_tienda FK
+        int numero_caja
+        string tipo_caja
+        int piso_ubicacion
+        string mac_address
+        string estado
+    }
+
+    TURNO_TRABAJO {
+        int id_turno PK
+        string nombre_turno
+        time hora_inicio
+        time hora_fin
+    }
+
+    ROL_EMPLEADO {
+        int id_rol PK
+        string nombre_rol
+    }
+
+    EMPLEADO {
+        int id_empleado PK
+        string dni
+        string nombres
+        string apellidos
+        int id_rol FK
+        int id_tienda_base FK
+        date fecha_ingreso
+        string estado
+    }
+
+    ASIGNACION_CAJA {
+        bigint id_asignacion PK
+        int id_caja FK
+        int id_empleado FK
+        int id_turno FK
+        date fecha_operacion
+        datetime hora_apertura
+        datetime hora_cierre
+        decimal saldo_inicial
+        decimal saldo_final
+    }
+
+    PROVEEDOR {
+        int id_proveedor PK
+        string ruc
+        string razon_social
+        string contacto_comercial
+        string telefono
+        string email
+        string condicion_pago
+        string estado
+    }
+
+    LINEA_COMERCIAL {
+        int id_linea PK
+        string codigo_linea
+        string nombre_linea
+    }
+
+    CATEGORIA {
+        int id_categoria PK
+        int id_linea FK
+        string nombre_categoria
+    }
+
+    SUBCATEGORIA {
+        int id_subcategoria PK
+        int id_categoria FK
+        string nombre_subcategoria
+    }
+
+    MARCA {
+        int id_marca PK
+        string nombre_marca
+        boolean es_marca_propia
+    }
+
+    PRODUCTO {
+        bigint id_producto PK
+        string sku
+        string codigo_barras
+        string nombre_producto
+        int id_subcategoria FK
+        int id_marca FK
+        int id_proveedor FK
+        decimal precio_lista
+        decimal costo_estandar
+        boolean requiere_despacho
+        string estado
+    }
+
+    INVENTARIO_TIENDA {
+        bigint id_inventario PK
+        int id_tienda FK
+        bigint id_producto FK
+        int stock_piso_venta
+        int stock_almacen
+        int stock_comprometido
+        int punto_reorden
+        datetime ultima_actualizacion
+    }
+
+    TIPO_DOCUMENTO {
+        int id_tipo_doc PK
+        string codigo_sunat
+        string descripcion
+    }
+
+    TIPO_CLIENTE {
+        int id_tipo_cliente PK
+        string nombre_tipo
+    }
+
+    CLIENTE {
+        bigint id_cliente PK
+        int id_tipo_doc FK
+        string numero_documento
+        string nombres
+        string apellidos
+        string email
+        string telefono
+        int id_tipo_cliente FK
+        boolean es_titular_tarjeta_ripley
+        int puntos_ripley_acumulados
+        datetime fecha_registro
+    }
+
+    METODO_PAGO {
+        int id_metodo_pago PK
+        string codigo_metodo
+        string descripcion
+        boolean aplica_comision
+    }
+
+    COMPROBANTE_PAGO {
+        bigint id_comprobante PK
+        int id_tienda FK
+        int id_caja FK
+        int id_empleado FK
+        bigint id_cliente FK
+        bigint id_asignacion FK
+        string tipo_comprobante
+        string serie
+        bigint numero_correlativo
+        datetime fecha_hora_inicio_atencion
+        datetime fecha_hora_emision
+        int tiempo_atencion_segundos
+        decimal subtotal_gravado
+        decimal igv
+        decimal total_descuento
+        decimal monto_total
+        string estado
+    }
+
+    DETALLE_COMPROBANTE {
+        bigint id_detalle PK
+        bigint id_comprobante FK
+        bigint id_producto FK
+        int cantidad
+        decimal precio_unitario_venta
+        decimal costo_unitario_historico
+        decimal descuento_unitario
+        decimal subtotal_linea
+    }
+
+    PAGO_COMPROBANTE {
+        bigint id_pago PK
+        bigint id_comprobante FK
+        int id_metodo_pago FK
+        decimal monto_pagado
+        string numero_operacion_pos
+        datetime fecha_hora_pago
+    }
+
+    ZONA_TIENDA {
+        int id_zona PK
+        int id_tienda FK
+        string nombre_zona
+        string tipo_zona
+        int aforo_limite
+    }
+
+    DISPOSITIVO_SENSOR {
+        int id_dispositivo PK
+        int id_zona FK
+        string codigo_sensor
+        string tipo_sensor
+        string ip_dispositivo
+        string estado
+    }
+
+    LOG_AFLUENCIA_IOT {
+        bigint id_log PK
+        int id_dispositivo FK
+        datetime fecha_hora_lectura
+        int conteo_entradas
+        int conteo_salidas
+        int aforo_instantaneo_calculado
+    }

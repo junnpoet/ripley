@@ -1,0 +1,28 @@
+services:
+  mysql-oltp:
+    image: mysql:8.0
+    container_name: ripley-mysql-oltp
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ripley_oltp}
+      MYSQL_USER: ${MYSQL_USER:-ripley_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ripley_pass}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - oltp_mysql_data:/var/lib/mysql
+      - ./database/oltp:/docker-entrypoint-initdb.d:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  oltp_mysql_data:
+    name: ripley_oltp_mysql_data
