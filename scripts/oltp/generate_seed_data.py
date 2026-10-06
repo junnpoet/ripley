@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 Generador masivo de datos transaccionales para Ripley OLTP.
-Produce suficiente volumen de transacciones para alcanzar ~11,000 registros
-en la tabla de hechos FACT_VENTAS (DETALLE_COMPROBANTE), junto con telemetría IoT,
-distribución realista de horas pico vs. horas valle, e inyección controlada de
-anomalías de calidad de datos para justificar las reglas del proceso ETL.
+Produce catálogo a escala de tienda por departamento (~5,000 productos, 38 subcategorías,
+44 marcas, 25 proveedores, 15,000 registros de inventario), padrón de clientes (~6,000 registros),
+dotación de personal por sede, transacciones comerciales masivas (~50,000 comprobantes con
+distribución de Pareto en ventas y horas pico) y telemetría IoT sincronizada.
 """
 
 import os
@@ -22,7 +22,10 @@ DB_USER = os.getenv("MYSQL_USER", "ripley_user")
 DB_PASS = os.getenv("MYSQL_PASSWORD", "ripley_pass")
 DB_NAME = os.getenv("MYSQL_DATABASE", "ripley_oltp")
 
-TARGET_FACT_ROWS = 11200  # Para obtener ~11,000 hechos válidos tras depurar anulados
+TARGET_PRODUCTS = 5000       # Catálogo ampliado de retail multidepartamental
+TARGET_TICKETS = 50000       # Transacciones comerciales objetivo
+NUM_CLIENTES = 6000          # Base de clientes registrados
+CHUNK_SIZE = 5000            # Lotes de inserción masiva
 START_DATE = datetime(2026, 7, 1)
 END_DATE = datetime(2026, 8, 31)  # 62 días de operación comercial
 
@@ -40,65 +43,7 @@ def get_connection():
 
 
 # -----------------------------------------------------------------------------
-# Catálogos Maestros Ampliados
-# -----------------------------------------------------------------------------
-
-EXPANDED_CLIENTS = [
-    ("00000000", "Clientes", "Varios", None, None, 1, False, 0),
-    ("45892140", "Andrea", "Morales Soto", "andrea.m@gmail.com", "987112233", 2, True, 2400),
-    ("72109845", "Mateo", "Vásquez Díaz", "mvasquez@hotmail.com", "991223344", 2, True, 1850),
-    ("10293847", "Camila", "Cáceres Ramos", "cami.c@outlook.com", "976334455", 1, False, 320),
-    ("41238901", "Rodrigo", "Herrera Gil", "r.herrera@yahoo.com", "965445566", 2, True, 5200),
-    ("73491028", "Valeria", "Gutiérrez Peña", "valeria.g@gmail.com", "954556677", 1, False, 110),
-    ("09812345", "Sebastián", "Navarro Castro", "sebas.nav@gmail.com", "943667788", 2, True, 3100),
-    ("44556677", "Luciana", "Ponce Quintana", "lponce@empresa.com.pe", "932778899", 3, True, 4200),
-    ("71239845", "Joaquín", "Delgado Ruiz", "jdelgado@outlook.com", "921889900", 1, False, 90),
-    ("40918273", "Daniela", "Mendoza Cruz", "daniela.m@gmail.com", "910990011", 2, True, 1950),
-    ("76543210", "Alejandro", "Cordero Salazar", "acordero@gmail.com", "987001122", 1, False, 450),
-    ("10456789", "Mariana", "Ríos Paredes", "mrios@hotmail.com", "976112233", 2, True, 2800),
-    ("43210987", "Gabriel", "Chávez Luna", "gchavez@outlook.com", "965223344", 1, False, 60),
-    ("75612349", "Paula", "Benavides Silva", "paula.b@gmail.com", "954334455", 2, True, 3600),
-    ("48901234", "Esteban", "Torres Aguirre", "etorres@gmail.com", "943445566", 3, True, 6100),
-]
-
-EXPANDED_PRODUCTS = [
-    ("SKU-MRQ-JN01", "77512340001", "Jean Marquis Flare Skinny Azul", 1, 1, 2, 129.90, 48.00, False),
-    ("SKU-MRQ-PL02", "77512340006", "Polo Marquis Básico Algodón Pima", 1, 1, 2, 49.90, 16.50, False),
-    ("SKU-MRQ-BL03", "77512340007", "Blusa Marquis Satinada Manga Larga", 1, 1, 2, 89.90, 32.00, False),
-    ("SKU-BRB-CS02", "77512340002", "Casaca Barbados Bomber Urbana", 2, 2, 2, 199.90, 75.00, False),
-    ("SKU-BRB-SW04", "77512340008", "Sweater Barbados Cuello Redondo", 2, 2, 2, 99.90, 36.00, False),
-    ("SKU-BRB-CH05", "77512340009", "Chaleco Acolchado Barbados Térmico", 2, 2, 2, 149.90, 52.00, False),
-    ("SKU-NIK-RN03", "00883410003", "Zapatillas Nike Pegasus 40 Black", 3, 4, 3, 489.90, 240.00, False),
-    ("SKU-NIK-TR06", "00883410010", "Polo Deportivo Nike Dri-FIT", 3, 4, 3, 119.90, 45.00, False),
-    ("SKU-NIK-CS07", "00883410011", "Casaca Cortaviento Nike Windrunner", 3, 4, 3, 299.90, 135.00, False),
-    ("SKU-SAM-TV04", "88060910004", "Smart TV Samsung 65 Neo QLED 4K", 4, 3, 1, 3499.00, 2150.00, True),
-    ("SKU-SAM-S24", "88060910012", "Smartphone Samsung Galaxy S24 Ultra", 5, 3, 1, 5299.00, 3850.00, False),
-    ("SKU-SAM-SB06", "88060910013", "Barra de Sonido Samsung Dolby Atmos", 4, 3, 1, 799.00, 420.00, False),
-    ("SKU-APP-IP05", "01942520005", "Apple iPhone 15 Pro 128GB Titanio", 5, 5, 1, 4899.00, 3700.00, False),
-    ("SKU-APP-AW07", "01942520014", "Apple Watch Series 9 GPS 45mm", 5, 5, 1, 1899.00, 1380.00, False),
-    ("SKU-APP-AP08", "01942520015", "Auriculares Apple AirPods Pro Gen 2", 5, 5, 1, 999.00, 680.00, False),
-    ("SKU-MRQ-VT09", "77512340016", "Vestido Marquis Corto Estampado", 1, 1, 2, 139.90, 46.00, False),
-    ("SKU-BRB-JN10", "77512340017", "Jean Barbados Regular Fit Denim", 1, 2, 2, 119.90, 42.00, False),
-    ("SKU-SAM-TV08", "88060910018", "Smart TV Samsung 55 Crystal UHD 4K", 4, 3, 1, 1699.00, 1050.00, True),
-    ("SKU-NIK-ZN09", "00883410019", "Zapatillas Nike Revolution 7 Running", 3, 4, 3, 249.90, 110.00, False),
-    ("SKU-BRB-PL11", "77512340020", "Polo Barbados Cuello V Estampado", 1, 2, 2, 59.90, 19.00, False),
-]
-
-EXPANDED_EMPLOYEES = [
-    ("45892147", "Carlos Alberto", "Gómez Mendoza", 1, 1, "2023-03-15"),
-    ("72145896", "María Fernanda", "Rojas Silva", 1, 1, "2024-01-10"),
-    ("48963251", "Lucía Andrea", "Paredes Castro", 2, 1, "2024-06-01"),
-    ("10254789", "Jorge Luis", "Vargas Salazar", 3, 1, "2022-08-20"),
-    ("70258963", "Ana Sofía", "Torres Benítez", 1, 2, "2023-11-05"),
-    ("43901245", "Diego Alonso", "Navarrete Flores", 1, 2, "2024-02-15"),
-    ("76123489", "Claudia Elena", "Cabrera Hurtado", 2, 2, "2024-05-20"),
-    ("15478963", "Renato Andrés", "Guerrero Vidal", 1, 3, "2023-09-12"),
-    ("74125896", "Paola Vanessa", "Santillán Cueva", 1, 3, "2024-03-01"),
-    ("42896314", "Fernando José", "Medina Orellana", 2, 3, "2024-04-18"),
-]
-
-# -----------------------------------------------------------------------------
-# Catálogos Maestros Completos (Autosuficientes)
+# Catálogos Maestros de Infraestructura y Negocio
 # -----------------------------------------------------------------------------
 
 BASE_UBIGEOS = [
@@ -126,41 +71,6 @@ BASE_ROLES = [
     (4, "Jefe de Tienda"),
 ]
 
-BASE_PROVEEDORES = [
-    (1, "20100070970", "Samsung Electronics Peru S.A.C.", "Juan Rivera", "01-7100000", "ventas@samsung.pe", "Credito 60 dias", "Activo"),
-    (2, "20512345678", "Textil San Cristóbal S.A.", "Elena Morales", "01-4752000", "contacto@san-cristobal.pe", "Credito 30 dias", "Activo"),
-    (3, "20334455667", "Nike European Operations Netherlands BV", "Gonzalo Peña", "01-6154000", "pe.ventas@nike.com", "Credito 45 dias", "Activo"),
-]
-
-BASE_LINEAS = [
-    (1, "LIN-MOD", "Moda y Calzado"),
-    (2, "LIN-TEC", "Electro y Tecnología"),
-    (3, "LIN-DEC", "Decohogar"),
-]
-
-BASE_CATEGORIAS = [
-    (1, 1, "Moda Mujer"),
-    (2, 1, "Calzado Deportivo"),
-    (3, 2, "Televisores y Audio"),
-    (4, 2, "Smartphones"),
-]
-
-BASE_SUBCATEGORIAS = [
-    (1, 1, "Jeans y Pantalones"),
-    (2, 1, "Casacas y Abrigos"),
-    (3, 2, "Zapatillas Running"),
-    (4, 3, "Smart TV OLED"),
-    (5, 4, "Celulares Gama Alta"),
-]
-
-BASE_MARCAS = [
-    (1, "Marquis", True),
-    (2, "Barbados", True),
-    (3, "Samsung", False),
-    (4, "Nike", False),
-    (5, "Apple", False),
-]
-
 BASE_TIPOS_DOC = [
     (1, "01", "DNI - Documento Nacional de Identidad"),
     (2, "04", "Carnet de Extranjería"),
@@ -183,17 +93,17 @@ BASE_METODOS_PAGO = [
 ]
 
 ALL_CAJAS = [
-    # Tienda 1: Jockey Plaza
+    # Tienda 1: Jockey Plaza (4 Cajas)
     (1, 1, "Caja Tradicional", 1, "00:1A:2B:3C:4D:01"),
     (1, 2, "Caja Tradicional", 1, "00:1A:2B:3C:4D:02"),
     (1, 3, "Self-Checkout", 1, "00:1A:2B:3C:4D:03"),
     (1, 4, "Self-Checkout", 2, "00:1A:2B:3C:4D:04"),
-    # Tienda 2: San Miguel
+    # Tienda 2: San Miguel (4 Cajas)
     (2, 1, "Caja Tradicional", 1, "00:1A:2B:3C:4E:01"),
     (2, 2, "Self-Checkout", 1, "00:1A:2B:3C:4E:02"),
     (2, 3, "Caja Tradicional", 1, "00:1A:2B:3C:4E:03"),
     (2, 4, "Self-Checkout", 2, "00:1A:2B:3C:4E:04"),
-    # Tienda 3: Arequipa
+    # Tienda 3: Arequipa (4 Cajas)
     (3, 1, "Caja Tradicional", 1, "00:1A:2B:3C:4F:01"),
     (3, 2, "Caja Tradicional", 1, "00:1A:2B:3C:4F:02"),
     (3, 3, "Self-Checkout", 1, "00:1A:2B:3C:4F:03"),
@@ -220,50 +130,497 @@ ALL_SENSORES = [
     (6, "IOT-TOF-AQP-02", "Sensor ToF Infrarrojo", "192.168.30.102"),
 ]
 
+EXPANDED_EMPLOYEES = [
+    # Tienda 1: Jockey Plaza (12 colaboradores)
+    ("45892147", "Carlos Alberto", "Gómez Mendoza", 1, 1, "2023-03-15"),
+    ("72145896", "María Fernanda", "Rojas Silva", 1, 1, "2024-01-10"),
+    ("48963251", "Lucía Andrea", "Paredes Castro", 1, 1, "2024-06-01"),
+    ("10254789", "Jorge Luis", "Vargas Salazar", 3, 1, "2022-08-20"),
+    ("41258963", "Renzo Gabriel", "Carrillo Tapia", 1, 1, "2023-05-11"),
+    ("70142589", "Fiorella Milagros", "Sánchez Huamán", 1, 1, "2023-11-20"),
+    ("44896325", "Álvaro Daniel", "Montoya Rivas", 2, 1, "2024-02-01"),
+    ("73258961", "Diana Carolina", "Castillo Flores", 1, 1, "2024-03-15"),
+    ("46985214", "Christian Jesús", "Morales Gil", 2, 1, "2024-04-10"),
+    ("71526398", "Brenda Jimena", "Navarro Díaz", 1, 1, "2023-09-01"),
+    ("43652147", "Víctor Manuel", "Ramos Peña", 3, 1, "2022-10-15"),
+    ("10985214", "Eduardo José", "Benavides Luna", 4, 1, "2021-06-01"),
+
+    # Tienda 2: San Miguel (9 colaboradores)
+    ("70258963", "Ana Sofía", "Torres Benítez", 1, 2, "2023-11-05"),
+    ("43901245", "Diego Alonso", "Navarrete Flores", 1, 2, "2024-02-15"),
+    ("76123489", "Claudia Elena", "Cabrera Hurtado", 2, 2, "2024-05-20"),
+    ("42158796", "Sebastián Andrés", "García Vidal", 1, 2, "2023-08-14"),
+    ("71896541", "Valeria Nicole", "Quispe Mamani", 1, 2, "2024-01-22"),
+    ("45632198", "Mateo Rodrigo", "Chávez Salazar", 1, 2, "2024-03-01"),
+    ("74521489", "Camila Alejandra", "Mendoza Ruiz", 2, 2, "2024-04-18"),
+    ("40258963", "Javier Hernán", "Ponce Espinoza", 3, 2, "2022-12-01"),
+    ("15987452", "Hugo David", "Alarcón Romero", 4, 2, "2021-09-10"),
+
+    # Tienda 3: Mall Aventura Arequipa (9 colaboradores)
+    ("15478963", "Renato Andrés", "Guerrero Vidal", 1, 3, "2023-09-12"),
+    ("74125896", "Paola Vanessa", "Santillán Cueva", 1, 3, "2024-03-01"),
+    ("42896314", "Fernando José", "Medina Orellana", 2, 3, "2024-04-18"),
+    ("70589632", "Gabriela Jimena", "Valdivia Condori", 1, 3, "2023-07-20"),
+    ("44785214", "Manuel Ricardo", "Tello Villanueva", 1, 3, "2023-10-05"),
+    ("72365418", "Adriana Lucía", "Huamán Mamani", 1, 3, "2024-02-10"),
+    ("46123987", "David Gonzalo", "Pacheco Zúñiga", 2, 3, "2024-05-02"),
+    ("75896321", "César Augusto", "Bustamante Prado", 3, 3, "2022-11-15"),
+    ("12365478", "Mario Francisco", "Solís Meléndez", 4, 3, "2021-08-01"),
+]
+
+
+# -----------------------------------------------------------------------------
+# Estructura Jerárquica Comercial y Proveedores Ampliada
+# -----------------------------------------------------------------------------
+
+BASE_LINEAS = [
+    (1, "LIN-MOD", "Moda y Calzado"),
+    (2, "LIN-TEC", "Electro y Tecnología"),
+    (3, "LIN-DEC", "Decohogar"),
+    (4, "LIN-BEL", "Belleza y Perfumería"),
+    (5, "LIN-DEP", "Deportes y Outdoor"),
+    (6, "LIN-INF", "Infantil y Juguetería"),
+]
+
+BASE_CATEGORIAS = [
+    # Línea 1: Moda y Calzado
+    (1, 1, "Moda Mujer"),
+    (2, 1, "Moda Hombre"),
+    (3, 1, "Calzado y Zapatillas"),
+    # Línea 2: Electro y Tecnología
+    (4, 2, "Televisores y Audio"),
+    (5, 2, "Smartphones y Telefonía"),
+    (6, 2, "Cómputo y Laptops"),
+    (7, 2, "Electrohogar y Línea Blanca"),
+    # Línea 3: Decohogar
+    (8, 3, "Dormitorio y Colchones"),
+    (9, 3, "Muebles de Sala y Comedor"),
+    (10, 3, "Menaje y Cocina"),
+    # Línea 4: Belleza y Perfumería
+    (11, 4, "Perfumería y Fragancias"),
+    (12, 4, "Cuidado Facial y Maquillaje"),
+    # Línea 5: Deportes y Outdoor
+    (13, 5, "Ropa y Calzado Deportivo"),
+    (14, 5, "Máquinas y Fitness"),
+    # Línea 6: Infantil y Juguetería
+    (15, 6, "Juguetes y Juegos de Mesa"),
+    (16, 6, "Moda Infantil y Bebés"),
+]
+
+BASE_SUBCATEGORIAS = [
+    # Moda Mujer
+    (1, 1, "Jeans y Denim Mujer"),
+    (2, 1, "Blusas, Tops y Polos Mujer"),
+    (3, 1, "Casacas y Abrigos Mujer"),
+    (4, 1, "Vestidos y Faldas"),
+    # Moda Hombre
+    (5, 2, "Jeans y Pantalones Hombre"),
+    (6, 2, "Polos y Camisas Hombre"),
+    (7, 2, "Casacas y Chompas Hombre"),
+    # Calzado
+    (8, 3, "Zapatillas Urbanas"),
+    (9, 3, "Zapatos y Botines"),
+    # Televisores y Audio
+    (10, 4, "Smart TV 4K, OLED y QLED"),
+    (11, 4, "Barras de Sonido y Audio"),
+    # Smartphones y Telefonía
+    (12, 5, "Smartphones Gama Alta y Media"),
+    (13, 5, "Smartwatches y Wearables"),
+    # Cómputo
+    (14, 6, "Laptops y Notebooks"),
+    (15, 6, "Monitores y Accesorios"),
+    # Electrohogar
+    (16, 7, "Refrigeradoras y Congeladoras"),
+    (17, 7, "Lavadoras y Secadoras"),
+    (18, 7, "Cocinas, Hornos y Microondas"),
+    # Dormitorio
+    (19, 8, "Colchones y Box Spring"),
+    (20, 8, "Ropa de Cama, Sábanas y Plumones"),
+    (21, 8, "Almohadas y Accesorios de Cama"),
+    # Muebles
+    (22, 9, "Sofás, Seccionales y Sillones"),
+    (23, 9, "Juegos de Comedor y Sillas"),
+    # Menaje
+    (24, 10, "Baterías de Cocina y Sartenes"),
+    (25, 10, "Vajilla, Vasos y Cristalería"),
+    # Perfumería
+    (26, 11, "Perfumes y Fragancias Mujer"),
+    (27, 11, "Perfumes y Fragancias Hombre"),
+    # Cuidado Facial
+    (28, 12, "Tratamiento Facial y Cremas"),
+    # Deportes
+    (29, 13, "Zapatillas de Running"),
+    (30, 13, "Ropa Deportiva Training"),
+    (31, 14, "Trotadoras y Máquinas de Ejercicio"),
+    (32, 14, "Mancuernas y Accesorios de Fuerza"),
+    # Juguetes
+    (33, 15, "Figuras de Acción y Muñecas"),
+    (34, 15, "Juegos de Construcción y Mesa"),
+    # Infantil
+    (35, 16, "Ropa y Bodys para Bebés"),
+    (36, 16, "Coches y Sillas para Auto"),
+]
+
+BASE_MARCAS = [
+    # Marcas Propias Ripley (10)
+    (1, "Marquis", True),
+    (2, "Barbados", True),
+    (3, "Index", True),
+    (4, "Harvest", True),
+    (5, "Aziz", True),
+    (6, "Ripley Home", True),
+    (7, "Tatienne", True),
+    (8, "Cloudbreak", True),
+    (9, "Regatta", True),
+    (10, "Navigata", True),
+    # Marcas Comerciales Externas (34)
+    (11, "Samsung", False),
+    (12, "Apple", False),
+    (13, "LG", False),
+    (14, "Sony", False),
+    (15, "Xiaomi", False),
+    (16, "HP", False),
+    (17, "Lenovo", False),
+    (18, "Asus", False),
+    (19, "Oster", False),
+    (20, "Bosch", False),
+    (21, "Mabe", False),
+    (22, "Electrolux", False),
+    (23, "Nike", False),
+    (24, "Adidas", False),
+    (25, "Puma", False),
+    (26, "Under Armour", False),
+    (27, "Skechers", False),
+    (28, "Vans", False),
+    (29, "Converse", False),
+    (30, "Paraíso", False),
+    (31, "Rosen", False),
+    (32, "Forli", False),
+    (33, "Drimer", False),
+    (34, "Carolina Herrera", False),
+    (35, "Paco Rabanne", False),
+    (36, "Dior", False),
+    (37, "L'Oréal", False),
+    (38, "Clinique", False),
+    (39, "Lego", False),
+    (40, "Hasbro", False),
+    (41, "Mattel", False),
+    (42, "Monark", False),
+    (43, "Oxford", False),
+    (44, "Chicco", False),
+]
+
+BASE_PROVEEDORES = [
+    (1, "20100070970", "Samsung Electronics Peru S.A.C.", "Juan Rivera", "01-7100000", "ventas@samsung.pe", "Credito 60 dias", "Activo"),
+    (2, "20512345678", "Textil San Cristóbal S.A.", "Elena Morales", "01-4752000", "contacto@san-cristobal.pe", "Credito 30 dias", "Activo"),
+    (3, "20334455667", "Nike European Operations Netherlands BV", "Gonzalo Peña", "01-6154000", "pe.ventas@nike.com", "Credito 45 dias", "Activo"),
+    (4, "20601234567", "Apple Perú S.R.L.", "Mariana Thorne", "01-5128000", "distribucion@apple.pe", "Credito 30 dias", "Activo"),
+    (5, "20100123456", "Productos Paraíso del Perú S.A.C.", "Héctor Barrientos", "01-6142000", "corporativo@paraiso.pe", "Credito 60 dias", "Activo"),
+    (6, "20258963147", "Rosen Perú S.A.", "Patricia Véliz", "01-7053000", "ventas@rosen.pe", "Credito 45 dias", "Activo"),
+    (7, "20345678901", "Sony Perú S.R.L.", "Ricardo Fujimori", "01-6188000", "corporativo@sony.pe", "Credito 30 dias", "Activo"),
+    (8, "20456789012", "LG Electronics Perú S.A.", "Claudia Benavides", "01-7109000", "b2b@lge.pe", "Credito 60 dias", "Activo"),
+    (9, "20501478963", "Adidas Perú S.A.C.", "Mauricio Castro", "01-6117000", "ventas@adidas.pe", "Credito 45 dias", "Activo"),
+    (10, "20514789632", "Puma Sports Perú S.A.C.", "Vanessa Salazar", "01-6184500", "contacto@puma.pe", "Credito 30 dias", "Activo"),
+    (11, "20301478965", "BSH Electrodomésticos S.A.C. (Bosch)", "Raúl Méndez", "01-2139000", "ventas@bshg.com", "Credito 60 dias", "Activo"),
+    (12, "20102589631", "Oster de Perú S.A.", "Silvia Campos", "01-6194000", "pedidos@oster.pe", "Credito 45 dias", "Activo"),
+    (13, "20547896321", "HP Inc. Perú S.R.L.", "Felipe Torres", "01-7005000", "ventas@hp.com.pe", "Credito 30 dias", "Activo"),
+    (14, "20569874123", "Lenovo Perú S.R.L.", "Karina Ramos", "01-6189500", "comercial@lenovo.pe", "Credito 30 dias", "Activo"),
+    (15, "20336589741", "L'Oréal Perú S.A.", "Daniela Prado", "01-2114000", "pedidos@loreal.com", "Credito 45 dias", "Activo"),
+    (16, "20412589632", "Puig Perú S.A.", "Esteban Vildoso", "01-6127800", "distribucion@puig.pe", "Credito 30 dias", "Activo"),
+    (17, "20603698521", "Lego System A/S Sucursal Perú", "Andrea Cáceres", "01-5129900", "ventas@lego.pe", "Credito 30 dias", "Activo"),
+    (18, "20503698521", "Hasbro Perú S.A.C.", "Jorge Del Busto", "01-6183300", "comercial@hasbro.pe", "Credito 45 dias", "Activo"),
+    (19, "20258741369", "Mattel Perú S.A.", "Rosa María Alva", "01-4458900", "contacto@mattel.pe", "Credito 45 dias", "Activo"),
+    (20, "20103698524", "Monark Perú S.A.", "César Hurtado", "01-6134000", "ventas@monark.pe", "Credito 60 dias", "Activo"),
+    (21, "20458796321", "Devanlay Perú S.A.C.", "Guillermo Silva", "01-4758900", "textil@devanlay.pe", "Credito 30 dias", "Activo"),
+    (22, "20332589614", "Forli Perú S.A.C.", "Arturo Vega", "01-6148000", "contacto@forli.com.pe", "Credito 60 dias", "Activo"),
+    (23, "20258963478", "Mabe Perú S.A.", "Luz Marina Ruiz", "01-7108800", "ventas@mabe.com.pe", "Credito 45 dias", "Activo"),
+    (24, "20604587963", "Xiaomi Perú S.A.C.", "Kevin Zhang", "01-7089900", "distribucion@xiaomi.pe", "Credito 30 dias", "Activo"),
+    (25, "20521478963", "Distribuidora D'Bebé S.A.C.", "Patricia Wong", "01-6192200", "pedidos@dbebe.pe", "Credito 30 dias", "Activo"),
+]
+
+
+# -----------------------------------------------------------------------------
+# Generadores Dinámicos: Clientes y Productos Masivos
+# -----------------------------------------------------------------------------
+
+def generate_clients_dataset(count=NUM_CLIENTES):
+    """Genera el padrón diverso y representativo de clientes peruanos."""
+    first_names_m = [
+        "Carlos", "Luis", "Juan", "José", "Miguel", "Jorge", "Diego", "Fernando", "Alejandro", "Mateo",
+        "Sebastián", "Rodrigo", "Joaquín", "Esteban", "Gabriel", "Renzo", "Christian", "Álvaro", "Víctor", "Manuel",
+        "Gonzalo", "Rafael", "Mario", "David", "Ricardo", "Daniel", "Eduardo", "Hugo", "César", "Javier",
+    ]
+    first_names_f = [
+        "María", "Ana", "Lucía", "Andrea", "Camila", "Valeria", "Paula", "Daniela", "Mariana", "Claudia",
+        "Paola", "Gabriela", "Sofía", "Fiorella", "Carmen", "Rosa", "Patricia", "Diana", "Brenda", "Natalia",
+        "Romina", "Alejandra", "Jimena", "Ximena", "Cecilia", "Milagros", "Adriana", "Fernanda", "Vanessa", "Carolina",
+    ]
+    surnames = [
+        "Quispe", "Flores", "Rodríguez", "Sánchez", "García", "Rojas", "Díaz", "Torres", "Chávez", "Mendoza",
+        "Ramos", "Castillo", "Morales", "Vásquez", "Castro", "Navarrete", "Gutiérrez", "Gil", "Navarro", "Ponce",
+        "Quintana", "Delgado", "Ruiz", "Benavides", "Silva", "Aguirre", "Salazar", "Paredes", "Luna", "Gómez",
+        "Vargas", "Benítez", "Guerrero", "Santillán", "Cueva", "Orellana", "Hurtado", "Vidal", "Valdivia", "Huamán",
+        "Mamani", "Condori", "Tello", "Villanueva", "Medina", "Cabrera", "Herrera", "Cáceres", "Peña", "Alarcón",
+    ]
+    email_domains = ["gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com"]
+    all_first_names = first_names_m + first_names_f
+    used_documents = set()
+
+    clients = [(1, "00000000", "Clientes", "Varios", None, None, 1, False, 0, "2023-01-01 08:00:00")]
+    used_documents.add((1, "00000000"))
+
+    start_reg = datetime(2023, 1, 1)
+    end_reg = datetime(2026, 6, 30)
+    delta_days = (end_reg - start_reg).days
+
+    for _ in range(count):
+        fn = random.choice(all_first_names)
+        sn1 = random.choice(surnames)
+        sn2 = random.choice(surnames)
+        apellidos = f"{sn1} {sn2}"
+
+        doc_rand = random.random()
+        if doc_rand < 0.82:
+            tipo_doc = 1  # DNI
+            doc_num = str(random.randint(10000000, 79999999))
+        elif doc_rand < 0.92:
+            tipo_doc = 3  # RUC
+            doc_num = f"10{random.randint(10000000, 79999999)}{random.randint(0, 9)}"
+        elif doc_rand < 0.97:
+            tipo_doc = 2  # Carnet Extranjería
+            doc_num = f"00{random.randint(1000000, 9999999)}"
+        else:
+            tipo_doc = 4  # Pasaporte
+            doc_num = f"PE{random.randint(100000, 999999)}"
+
+        while (tipo_doc, doc_num) in used_documents:
+            doc_num = str(random.randint(10000000, 79999999))
+        used_documents.add((tipo_doc, doc_num))
+
+        tipo_cli_rand = random.random()
+        if tipo_cli_rand < 0.60:
+            id_tipo_cliente = 1
+            es_titular_tarjeta = random.random() < 0.08
+        elif tipo_cli_rand < 0.95:
+            id_tipo_cliente = 2
+            es_titular_tarjeta = True
+        else:
+            id_tipo_cliente = 3
+            es_titular_tarjeta = True
+
+        puntos = random.randint(300, 16000) if es_titular_tarjeta else (random.randint(0, 400) if random.random() < 0.20 else 0)
+        domain = random.choice(email_domains)
+        email = f"{fn.lower()}.{sn1.lower()}{random.randint(1, 999)}@{domain}"
+        telefono = f"9{random.randint(10000000, 99999999)}"
+        reg_dt = start_reg + timedelta(days=random.randint(0, delta_days), seconds=random.randint(0, 86399))
+
+        clients.append((
+            tipo_doc, doc_num, fn, apellidos, email, telefono,
+            id_tipo_cliente, es_titular_tarjeta, puntos, reg_dt.strftime("%Y-%m-%d %H:%M:%S")
+        ))
+
+    return clients
+
+
+def generate_products_dataset(target_count=TARGET_PRODUCTS):
+    """
+    Genera 5,000 productos realistas cubriendo los 6 departamentos comerciales de Ripley.
+    Asigna precios coherentes, márgenes mayoristas, marcas auténticas y reglas de despacho.
+    """
+    # Mapeo de marcas
+    brand_names = {b[0]: b[1] for b in BASE_MARCAS}
+
+    # Definición de plantillas por subcategoría:
+    # (id_subcat, [marcas], [proveedores], plantilla_nombre, precio_min, precio_max, requiere_despacho)
+    templates = [
+        # Moda Mujer
+        (1, [1, 3, 5, 7], [2, 21], "Jean {brand} {fit} Denim {color}", 89.90, 199.90, False),
+        (2, [1, 3, 5, 7], [2, 21], "Blusa {brand} {style} Manga {sleeve} {color}", 49.90, 129.90, False),
+        (3, [1, 3, 7, 8], [2, 21], "Casaca {brand} {jacket} Acolchada {color}", 149.90, 329.90, False),
+        (4, [1, 3, 5, 7], [2, 21], "Vestido {brand} {dress_type} {pattern} {color}", 99.90, 249.90, False),
+        # Moda Hombre
+        (5, [2, 4, 8, 9, 10], [2, 21], "Jean {brand} Regular Fit Denim {color}", 89.90, 189.90, False),
+        (6, [2, 4, 8, 9, 10], [2, 21], "Polo {brand} Algodón Pima Cuello {neck} {color}", 39.90, 89.90, False),
+        (7, [2, 4, 8, 9, 10], [2, 21], "Casaca {brand} Bomber Urbana {color}", 139.90, 299.90, False),
+        # Calzado Urbano y Formal
+        (8, [23, 24, 25, 27, 28, 29], [3, 9, 10], "Zapatillas {brand} Urbanas {model} {color}", 179.90, 429.90, False),
+        (9, [1, 2, 5], [2], "Zapatos {brand} Formales de Cuero {color}", 149.90, 289.90, False),
+        # Televisores y Audio
+        (10, [11, 13, 14, 15], [1, 7, 8, 24], "Smart TV {brand} {tv_size} 4K UHD {display_tech}", 1199.00, 5499.00, True),
+        (11, [11, 13, 14], [1, 7, 8], "Barra de Sonido {brand} Dolby Atmos {watts}W", 499.00, 1899.00, False),
+        # Smartphones y Wearables
+        (12, [11, 12, 15], [1, 4, 24], "Smartphone {brand} {phone_line} {storage}GB {color}", 899.00, 5299.00, False),
+        (13, [11, 12, 15], [1, 4, 24], "Smartwatch {brand} {watch_line} GPS {dial_size}mm", 499.00, 1999.00, False),
+        # Cómputo y Laptops
+        (14, [16, 17, 18, 12], [4, 13, 14], "Laptop {brand} {lap_line} 15.6 Core i{core} {ram}GB RAM", 1799.00, 5499.00, False),
+        (15, [11, 13, 16], [1, 8, 13], "Monitor Gamer {brand} {mon_size} Full HD 144Hz", 599.00, 1599.00, False),
+        # Electrohogar / Línea Blanca
+        (16, [11, 13, 20, 21, 22, 23], [1, 8, 11, 23], "Refrigeradora {brand} No Frost {liters}L Inverter", 1499.00, 4599.00, True),
+        (17, [11, 13, 20, 22, 23], [1, 8, 11, 23], "Lavadora Automática {brand} {kg}Kg Carga Frontal", 1199.00, 3299.00, True),
+        (18, [19, 20, 23], [11, 12, 23], "Cocina {brand} 4 Hornillas Encendido Eléctrico {color}", 799.00, 2199.00, True),
+        # Dormitorio y Colchones
+        (19, [30, 31, 32, 33], [5, 6, 22], "Colchón {brand} Ortopédico Ergo {bed_size}", 799.00, 2699.00, True),
+        (20, [1, 2, 6], [2], "Juego de Sábanas {brand} 300 Hilos {bed_size}", 99.90, 229.90, False),
+        (21, [6, 30, 31], [5, 6], "Almohada {brand} Memory Foam Cervical Antialérgica", 59.90, 149.90, False),
+        # Muebles de Sala y Comedor
+        (22, [6], [2], "Sofá Seccional {brand} Tela Lino {seats} Cuerpos {color}", 1299.00, 3599.00, True),
+        (23, [6], [2], "Juego de Comedor {brand} 6 Sillas Madera Paraíso", 1499.00, 3199.00, True),
+        # Menaje y Cocina
+        (24, [19, 20], [11, 12], "Batería de Cocina {brand} Antiadherente {pieces} Piezas", 189.90, 499.90, False),
+        (25, [6], [2], "Juego de Vajilla {brand} Cerámica {pieces_v} Piezas", 119.90, 299.90, False),
+        # Perfumería y Cuidado Personal
+        (26, [34, 35, 36, 38], [15, 16], "Perfume {brand} {perf_f} Eau de Parfum {ml}ml", 199.90, 589.90, False),
+        (27, [34, 35, 36], [15, 16], "Perfume {brand} {perf_m} Eau de Toilette {ml}ml", 189.90, 549.90, False),
+        (28, [37, 38], [15], "Crema Facial {brand} Tratamiento Antiedad Revitalift", 79.90, 249.90, False),
+        # Deportes y Fitness
+        (29, [23, 24, 25, 26], [3, 9, 10], "Zapatillas {brand} Running {run_model} Pro", 229.90, 549.90, False),
+        (30, [23, 24, 25, 26], [3, 9, 10], "Polo Deportivo {brand} Dri-FIT Transpirable {color}", 69.90, 149.90, False),
+        (31, [42, 43], [20], "Trotadora Eléctrica {brand} Motor {hp}HP Inclinación Digital", 1699.00, 4299.00, True),
+        (32, [42, 43], [20], "Set Mancuernas Ajustables {brand} {kg_m}Kg con Soporte", 149.90, 499.90, False),
+        # Infantil y Juguetería
+        (33, [39, 40, 41], [17, 18, 19], "Figura de Acción {brand} {toy_line} Articulada", 49.90, 189.90, False),
+        (34, [39, 40], [17, 18], "Set de Construcción {brand} Edición Coleccionista", 89.90, 429.90, False),
+        (35, [1, 7, 44], [2, 25], "Pack 3 Bodys Algodón Orgánico {brand} Bebé {color}", 49.90, 99.90, False),
+        (36, [44], [25], "Coche Travel System {brand} Reclinable con Silla Auto", 699.00, 1899.00, True),
+    ]
+
+    fits = ["Skinny", "Slim", "Regular", "Flare", "Oversize", "Straight"]
+    colors = ["Azul", "Negro", "Blanco", "Gris", "Beige", "Verde Militar", "Rojo", "Azul Marino", "Celeste", "Marrón", "Palo Rosa"]
+    styles = ["Satinada", "Casual", "Elegante", "Estampada", "Básica"]
+    sleeves = ["Larga", "Corta", "3/4"]
+    jackets = ["Bomber", "Parka", "Cortaviento", "Denim", "Puffer"]
+    dress_types = ["Corto", "Midi", "Largo de Fiesta", "Camisero"]
+    patterns = ["Floral", "Liso", "Rayas", "Animal Print"]
+    necks = ["Redondo", "V", "Polo"]
+    models_urb = ["Air Max", "Superstar", "Smash", "Classic Leather", "Old Skool", "Chuck 70", "D'Lites"]
+    run_models = ["Pegasus", "Ultraboost", "Nitro", "Ghost", "Floatride", "Gel-Nimbus"]
+    tv_sizes = ["50\"", "55\"", "65\"", "75\"", "85\""]
+    disp_techs = ["Neo QLED", "Crystal UHD", "NanoCell", "OLED Evo", "Triluminos"]
+    watts = [240, 320, 450, 600]
+    phone_lines = ["Galaxy S24", "Galaxy A55", "iPhone 15", "iPhone 13", "Redmi Note 13", "Xiaomi 14 Ultra"]
+    watch_lines = ["Watch Series 9", "Galaxy Watch 6", "Redmi Watch 4", "Band 8 Pro"]
+    lap_lines = ["Pavilion", "IdeaPad", "ZenBook", "MacBook Air", "TUF Gaming", "ThinkPad"]
+    bed_sizes = ["1.5 Plazas", "2 Plazas", "Queen Size", "King Size"]
+    perf_f = ["Good Girl", "La Vie Est Belle", "J'adore", "Black Opium", "212 VIP Rose"]
+    perf_m = ["Sauvage", "1 Million", "Invictus", "Acqua Di Gio", "212 Men Heroes"]
+
+    products = []
+    used_skus = set()
+    used_barcodes = set()
+
+    for i in range(1, target_count + 1):
+        tmpl = random.choice(templates)
+        subcat_id = tmpl[0]
+        brand_id = random.choice(tmpl[1])
+        brand_name = brand_names[brand_id]
+        prov_id = random.choice(tmpl[2])
+
+        sku = f"SKU-{brand_name[:3].upper()}-{subcat_id:02d}-{i:05d}"
+        barcode = f"775{i:08d}"
+
+        price = round(random.uniform(tmpl[4], tmpl[5]), 2)
+        # Margen comercial estándar: costo 42% a 60% del precio de venta
+        cost = round(price * random.uniform(0.42, 0.60), 2)
+        requiere_despacho = tmpl[6]
+
+        name = tmpl[3].format(
+            brand=brand_name,
+            fit=random.choice(fits),
+            color=random.choice(colors),
+            style=random.choice(styles),
+            sleeve=random.choice(sleeves),
+            jacket=random.choice(jackets),
+            dress_type=random.choice(dress_types),
+            pattern=random.choice(patterns),
+            neck=random.choice(necks),
+            model=random.choice(models_urb),
+            tv_size=random.choice(tv_sizes),
+            display_tech=random.choice(disp_techs),
+            watts=random.choice(watts),
+            phone_line=random.choice(phone_lines),
+            storage=random.choice([128, 256, 512]),
+            watch_line=random.choice(watch_lines),
+            dial_size=random.choice([40, 44, 45, 49]),
+            lap_line=random.choice(lap_lines),
+            core=random.choice([5, 7, 9]),
+            ram=random.choice([8, 16, 32]),
+            mon_size=random.choice(["24\"", "27\"", "32\""]),
+            liters=random.choice([250, 380, 450, 520]),
+            kg=random.choice([10, 13, 16, 19]),
+            bed_size=random.choice(bed_sizes),
+            seats=random.choice([2, 3, 4]),
+            pieces=random.choice([5, 7, 10]),
+            pieces_v=random.choice([16, 20, 30]),
+            perf_f=random.choice(perf_f),
+            perf_m=random.choice(perf_m),
+            ml=random.choice([50, 80, 100]),
+            run_model=random.choice(run_models),
+            hp=random.choice(["2.0", "2.5", "3.0"]),
+            kg_m=random.choice([15, 20, 30]),
+            toy_line=random.choice(["Marvel Avengers", "Star Wars", "Barbie Fashion", "Transformers"]),
+        )
+
+        products.append((
+            i, sku, barcode, name, subcat_id, brand_id, prov_id, price, cost, requiere_despacho, "Activo"
+        ))
+
+    return products
+
 
 def setup_masters(conn):
-    """Puebla de forma completa y autosuficiente todos los catálogos maestros."""
-    print("📋 Verificando y poblando catálogos maestros...")
+    """Puebla de forma completa y autosuficiente todos los catálogos maestros y el inventario."""
+    print("📋 Verificando y sincronizando catálogos maestros...")
     with conn.cursor() as cur:
         cur.execute("SET NAMES utf8mb4;")
         cur.execute("SET FOREIGN_KEY_CHECKS = 0;")
 
-        # Estructura Geográfica y Tiendas
+        # Estructura Geográfica, Tiendas y Cajas
         cur.executemany("INSERT IGNORE INTO `UBIGEO` (`id_ubigeo`, `departamento`, `provincia`, `distrito`) VALUES (%s, %s, %s, %s)", BASE_UBIGEOS)
         cur.executemany("INSERT IGNORE INTO `TIENDA` (`id_tienda`, `codigo_tienda`, `nombre`, `direccion`, `id_ubigeo`, `superficie_m2`, `aforo_maximo`, `estado`) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", BASE_TIENDAS)
         cur.executemany("INSERT IGNORE INTO `TURNO_TRABAJO` (`id_turno`, `nombre_turno`, `hora_inicio`, `hora_fin`) VALUES (%s, %s, %s, %s)", BASE_TURNOS)
         cur.executemany("INSERT IGNORE INTO `ROL_EMPLEADO` (`id_rol`, `nombre_rol`) VALUES (%s, %s)", BASE_ROLES)
         cur.executemany("INSERT IGNORE INTO `CAJA_POS` (`id_tienda`, `numero_caja`, `tipo_caja`, `piso_ubicacion`, `mac_address`) VALUES (%s, %s, %s, %s, %s)", ALL_CAJAS)
 
-        # Catálogo de Productos
-        cur.executemany("INSERT IGNORE INTO `PROVEEDOR` (`id_proveedor`, `ruc`, `razon_social`, `contacto_comercial`, `telefono`, `email`, `condicion_pago`, `estado`) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", BASE_PROVEEDORES)
-        cur.executemany("INSERT IGNORE INTO `LINEA_COMERCIAL` (`id_linea`, `codigo_linea`, `nombre_linea`) VALUES (%s, %s, %s)", BASE_LINEAS)
-        cur.executemany("INSERT IGNORE INTO `CATEGORIA` (`id_categoria`, `id_linea`, `nombre_categoria`) VALUES (%s, %s, %s)", BASE_CATEGORIAS)
-        cur.executemany("INSERT IGNORE INTO `SUBCATEGORIA` (`id_subcategoria`, `id_categoria`, `nombre_subcategoria`) VALUES (%s, %s, %s)", BASE_SUBCATEGORIAS)
-        cur.executemany("INSERT IGNORE INTO `MARCA` (`id_marca`, `nombre_marca`, `es_marca_propia`) VALUES (%s, %s, %s)", BASE_MARCAS)
-        cur.executemany(
-            """
-            INSERT IGNORE INTO `PRODUCTO`
-            (`sku`, `codigo_barras`, `nombre_producto`, `id_subcategoria`, `id_marca`, `id_proveedor`, `precio_lista`, `costo_estandar`, `requiere_despacho`)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            EXPANDED_PRODUCTS,
-        )
+        # Jerarquía Comercial: Líneas, Categorías, Subcategorías, Marcas y Proveedores
+        cur.execute("TRUNCATE TABLE `SUBCATEGORIA`;")
+        cur.execute("TRUNCATE TABLE `CATEGORIA`;")
+        cur.execute("TRUNCATE TABLE `LINEA_COMERCIAL`;")
+        cur.execute("TRUNCATE TABLE `MARCA`;")
+        cur.execute("TRUNCATE TABLE `PROVEEDOR`;")
 
-        # Clientes y Medios de Pago
+        cur.executemany("INSERT INTO `PROVEEDOR` (`id_proveedor`, `ruc`, `razon_social`, `contacto_comercial`, `telefono`, `email`, `condicion_pago`, `estado`) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", BASE_PROVEEDORES)
+        cur.executemany("INSERT INTO `LINEA_COMERCIAL` (`id_linea`, `codigo_linea`, `nombre_linea`) VALUES (%s, %s, %s)", BASE_LINEAS)
+        cur.executemany("INSERT INTO `CATEGORIA` (`id_categoria`, `id_linea`, `nombre_categoria`) VALUES (%s, %s, %s)", BASE_CATEGORIAS)
+        cur.executemany("INSERT INTO `SUBCATEGORIA` (`id_subcategoria`, `id_categoria`, `nombre_subcategoria`) VALUES (%s, %s, %s)", BASE_SUBCATEGORIAS)
+        cur.executemany("INSERT INTO `MARCA` (`id_marca`, `nombre_marca`, `es_marca_propia`) VALUES (%s, %s, %s)", BASE_MARCAS)
+
+        # Catálogo Ampliado de Productos (~5,000 SKUs)
+        cur.execute("SELECT COUNT(*) FROM `PRODUCTO`;")
+        current_prod_count = cur.fetchone()[0]
+
+        if current_prod_count < TARGET_PRODUCTS:
+            print(f"  → Generando catálogo masivo de {TARGET_PRODUCTS:,} productos...")
+            products_data = generate_products_dataset(TARGET_PRODUCTS)
+            cur.execute("TRUNCATE TABLE `PRODUCTO`;")
+
+            insert_prod_sql = """
+                INSERT INTO `PRODUCTO`
+                (`id_producto`, `sku`, `codigo_barras`, `nombre_producto`, `id_subcategoria`, `id_marca`,
+                 `id_proveedor`, `precio_lista`, `costo_estandar`, `requiere_despacho`, `estado`)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            for i in range(0, len(products_data), 1000):
+                cur.executemany(insert_prod_sql, products_data[i:i + 1000])
+            print(f"  ✓ {len(products_data):,} productos cargados exitosamente.")
+        else:
+            print(f"  ✓ Catálogo de productos ya cuenta con {current_prod_count:,} registros.")
+
+        # Tablas de Apoyo de Clientes, Documentos y Medios de Pago
         cur.executemany("INSERT IGNORE INTO `TIPO_DOCUMENTO` (`id_tipo_doc`, `codigo_sunat`, `descripcion`) VALUES (%s, %s, %s)", BASE_TIPOS_DOC)
         cur.executemany("INSERT IGNORE INTO `TIPO_CLIENTE` (`id_tipo_cliente`, `nombre_tipo`) VALUES (%s, %s)", BASE_TIPOS_CLIENTE)
         cur.executemany("INSERT IGNORE INTO `METODO_PAGO` (`id_metodo_pago`, `codigo_metodo`, `descripcion`, `aplica_comision`) VALUES (%s, %s, %s, %s)", BASE_METODOS_PAGO)
-        cur.executemany(
-            """
-            INSERT IGNORE INTO `CLIENTE` 
-            (`id_tipo_doc`, `numero_documento`, `nombres`, `apellidos`, `email`, `telefono`, `id_tipo_cliente`, `es_titular_tarjeta_ripley`, `puntos_ripley_acumulados`)
-            VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            EXPANDED_CLIENTS,
-        )
 
-        # Empleados
+        # Empleados y Sensores IoT
         cur.executemany(
             """
             INSERT IGNORE INTO `EMPLEADO`
@@ -272,12 +629,31 @@ def setup_masters(conn):
             """,
             EXPANDED_EMPLOYEES,
         )
-
-        # Zonas y Sensores IoT
         cur.executemany("INSERT IGNORE INTO `ZONA_TIENDA` (`id_tienda`, `nombre_zona`, `tipo_zona`, `aforo_limite`) VALUES (%s, %s, %s, %s)", ALL_ZONAS)
         cur.executemany("INSERT IGNORE INTO `DISPOSITIVO_SENSOR` (`id_zona`, `codigo_sensor`, `tipo_sensor`, `ip_dispositivo`) VALUES (%s, %s, %s, %s)", ALL_SENSORES)
 
-        # Inventario Inicial para cada tienda y producto
+        # Generación del Padrón de Clientes
+        cur.execute("SELECT COUNT(*) FROM `CLIENTE`;")
+        current_client_count = cur.fetchone()[0]
+
+        if current_client_count < NUM_CLIENTES:
+            print(f"  → Generando padrón ampliado de {NUM_CLIENTES:,} clientes...")
+            clients_data = generate_clients_dataset(NUM_CLIENTES)
+            cur.execute("TRUNCATE TABLE `CLIENTE`;")
+
+            insert_client_sql = """
+                INSERT INTO `CLIENTE`
+                (`id_tipo_doc`, `numero_documento`, `nombres`, `apellidos`, `email`, `telefono`,
+                 `id_tipo_cliente`, `es_titular_tarjeta_ripley`, `puntos_ripley_acumulados`, `fecha_registro`)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            for i in range(0, len(clients_data), 2000):
+                cur.executemany(insert_client_sql, clients_data[i:i + 2000])
+            print(f"  ✓ {len(clients_data):,} clientes registrados exitosamente.")
+
+        # Sincronización de Inventarios en Tienda (3 sedes x 5,000 SKUs = 15,000 registros)
+        print("  → Sincronizando existencias de almacén e inventarios por tienda...")
+        cur.execute("TRUNCATE TABLE `INVENTARIO_TIENDA`;")
         cur.execute("SELECT id_tienda FROM `TIENDA`;")
         tiendas = [r[0] for r in cur.fetchall()]
         cur.execute("SELECT id_producto FROM `PRODUCTO`;")
@@ -286,45 +662,47 @@ def setup_masters(conn):
         inventarios = []
         for t_id in tiendas:
             for p_id in productos:
-                inventarios.append((t_id, p_id, 30, 80, 0, 10))
+                stock_piso = random.randint(15, 60)
+                stock_alm = random.randint(30, 200)
+                reorden = random.randint(10, 25)
+                inventarios.append((t_id, p_id, stock_piso, stock_alm, 0, reorden))
 
-        cur.executemany(
-            """
-            INSERT IGNORE INTO `INVENTARIO_TIENDA`
+        insert_inv_sql = """
+            INSERT INTO `INVENTARIO_TIENDA`
             (`id_tienda`, `id_producto`, `stock_piso_venta`, `stock_almacen`, `stock_comprometido`, `punto_reorden`)
             VALUES (%s, %s, %s, %s, %s, %s)
-            """,
-            inventarios,
-        )
+        """
+        for i in range(0, len(inventarios), 3000):
+            cur.executemany(insert_inv_sql, inventarios[i:i + 3000])
+
+        print(f"  ✓ {len(inventarios):,} registros de inventario inicializados.")
 
         cur.execute("SET FOREIGN_KEY_CHECKS = 1;")
 
     conn.commit()
-    print("  ✓ Todos los maestros e inventarios inicializados.")
+    print("  ✓ Todos los maestros, catálogos e inventarios están listos.")
 
 
 def generate_transactions(conn):
-    """Genera las transacciones con distribución de horas pico y anomalías ETL."""
-    print("\n🛒 Generando transacciones comerciales (objetivo: ~11,000 hechos)...")
+    """
+    Genera las transacciones comerciales a gran escala (~50,000 comprobantes).
+    Aplica distribución de Pareto en productos y clientes, horas pico, cálculo SUNAT y lotes masivos.
+    """
+    print(f"\n🛒 Generando transacciones comerciales (objetivo: ~{TARGET_TICKETS:,} comprobantes)...")
 
     with conn.cursor() as cur:
-        # Obtener IDs reales de la base de datos
-        cur.execute("SELECT id_producto, precio_lista, costo_estandar FROM PRODUCTO WHERE estado='Activo';")
-        products = cur.fetchall()  # [(id, precio, costo), ...]
+        cur.execute("SELECT id_producto, precio_lista, costo_estandar FROM PRODUCTO WHERE estado='Activo' ORDER BY id_producto;")
+        products = cur.fetchall()
 
-        cur.execute("SELECT id_cliente FROM CLIENTE;")
-        client_ids = [row[0] for row in cur.fetchall()]
+        cur.execute("SELECT id_cliente, es_titular_tarjeta_ripley FROM CLIENTE ORDER BY id_cliente;")
+        client_rows = cur.fetchall()
 
         cur.execute("SELECT id_caja, id_tienda FROM CAJA_POS WHERE estado='Operativa';")
-        cajas = cur.fetchall()  # [(id_caja, id_tienda), ...]
+        cajas = cur.fetchall()
 
         cur.execute("SELECT id_empleado, id_tienda_base FROM EMPLEADO WHERE estado='Activo';")
         empleados = cur.fetchall()
 
-        cur.execute("SELECT id_metodo_pago FROM METODO_PAGO;")
-        payment_methods = [row[0] for row in cur.fetchall()]
-
-    # Mapeo de cajas por tienda y empleados por tienda
     cajas_by_tienda = {}
     for c_id, t_id in cajas:
         cajas_by_tienda.setdefault(t_id, []).append(c_id)
@@ -333,7 +711,41 @@ def generate_transactions(conn):
     for e_id, t_id in empleados:
         emp_by_tienda.setdefault(t_id, []).append(e_id)
 
-    # Limpiar eventos transaccionales previos para evitar duplicación
+    # 1. Ponderación Pareto de Productos (Top sellers vs. Long-tail)
+    # Top 10% (500 productos) concentra ~60% de unidades vendidas
+    # Siguiente 25% (1,250 productos) concentra ~25%
+    # 65% restante (3,250 productos) representa compras ocasionales (~15%)
+    prod_weights = []
+    for idx in range(len(products)):
+        if idx < 500:
+            prod_weights.append(random.randint(30, 65))
+        elif idx < 1750:
+            prod_weights.append(random.randint(7, 18))
+        else:
+            prod_weights.append(random.randint(1, 3))
+
+    # Pre-muestreo vectorizado de productos para máxima velocidad
+    total_items_to_sample = int(TARGET_TICKETS * 2.15) + 5000
+    sampled_product_pool = random.choices(products, weights=prod_weights, k=total_items_to_sample)
+    prod_pool_pointer = 0
+
+    # 2. Ponderación Pareto de Clientes
+    client_ids = [r[0] for r in client_rows]
+    client_titular_map = {r[0]: bool(r[1]) for r in client_rows}
+
+    client_weights = []
+    for c_id in client_ids:
+        if c_id == 1:
+            client_weights.append(7200)  # ~14.5% Clientes Varios
+        elif client_titular_map[c_id]:
+            client_weights.append(random.randint(6, 16))
+        else:
+            client_weights.append(random.randint(1, 4))
+
+    precomputed_clients = random.choices(client_ids, weights=client_weights, k=TARGET_TICKETS + 2000)
+    client_idx_pointer = 0
+
+    # Limpiar tablas transaccionales
     with conn.cursor() as cur:
         cur.execute("SET FOREIGN_KEY_CHECKS = 0;")
         cur.execute("TRUNCATE TABLE `DETALLE_COMPROBANTE`;")
@@ -343,10 +755,16 @@ def generate_transactions(conn):
         cur.execute("SET FOREIGN_KEY_CHECKS = 1;")
     conn.commit()
 
-    # 1. Generar Asignaciones de caja por día y turno
-    print("  → Creando sesiones de apertura de caja (ASIGNACION_CAJA)...")
+    # 3. Generar Asignaciones de Caja por día y turno
+    print("  → Creando sesiones de apertura y cierre de caja (ASIGNACION_CAJA)...")
     curr_date = START_DATE
-    asignaciones = []  # (id_caja, id_empleado, id_turno, fecha, apertura, cierre, saldo_ini, saldo_fin)
+    asignaciones = []
+
+    turnos_def = [
+        (1, "10:00:00", "14:00:00"),
+        (2, "14:00:00", "18:30:00"),
+        (3, "18:30:00", "22:00:00"),
+    ]
 
     while curr_date <= END_DATE:
         for t_id in [1, 2, 3]:
@@ -356,12 +774,11 @@ def generate_transactions(conn):
                 continue
 
             for caja_id in store_cajas:
-                emp_id = random.choice(store_emps)
-                # Turno 2 (Tarde Pico) cubre las horas pico principales
-                for turno_id, h_ini, h_fin in [(1, "10:00:00", "14:00:00"), (2, "14:00:00", "18:30:00"), (3, "18:30:00", "22:00:00")]:
+                for turno_id, h_ini, h_fin in turnos_def:
+                    emp_id = random.choice(store_emps)
                     apertura = datetime.combine(curr_date.date(), datetime.strptime(h_ini, "%H:%M:%S").time())
                     cierre = datetime.combine(curr_date.date(), datetime.strptime(h_fin, "%H:%M:%S").time())
-                    asignaciones.append((caja_id, emp_id, turno_id, curr_date.date(), apertura, cierre, 300.0, 4200.0))
+                    asignaciones.append((caja_id, emp_id, turno_id, curr_date.date(), apertura, cierre, 300.0, 4800.0))
 
         curr_date += timedelta(days=1)
 
@@ -376,195 +793,218 @@ def generate_transactions(conn):
         )
     conn.commit()
 
-    # Mapeo rápido de asignaciones para asociar a comprobantes
+    # Mapeo indexado de asignaciones
     with conn.cursor() as cur:
         cur.execute("SELECT id_asignacion, id_caja, id_empleado, fecha_operacion, hora_apertura, hora_cierre FROM ASIGNACION_CAJA;")
         asig_rows = cur.fetchall()
 
-    asig_map = {}  # (id_caja, date, turno_hora) -> (id_asig, id_emp)
+    asig_map = {}
     for asig_id, c_id, e_id, f_op, h_ap, h_ci in asig_rows:
         asig_map.setdefault((c_id, f_op), []).append((asig_id, e_id, h_ap, h_ci))
 
-    print(f"  ✓ {len(asignaciones)} sesiones de caja generadas.")
+    print(f"  ✓ {len(asignaciones):,} sesiones de caja generadas.")
 
-    # 2. Generación de Comprobantes, Detalles y Pagos
-    print("  → Generando tickets de venta y líneas atómicas...")
-    total_days = (END_DATE - START_DATE).days + 1
-    # Calculamos tickets diarios necesarios para sumar ~11,200 líneas (aprox. 3 líneas por ticket = ~3,750 tickets)
-    tickets_target = 3900
-    tickets_per_day_base = tickets_target // total_days
+    # 4. Planificación de Tickets Diarios
+    base_daily_tickets = int(TARGET_TICKETS / (44 * 0.95 + 18 * 1.45))
 
-    comprobantes_batch = []
-    detalles_batch = []
-    pagos_batch = []
+    correlativos = {
+        ("Boleta de Venta", "B001"): 100000,
+        ("Boleta de Venta", "B002"): 100000,
+        ("Boleta de Venta", "B003"): 100000,
+        ("Factura", "F001"): 100000,
+        ("Factura", "F002"): 100000,
+        ("Factura", "F003"): 100000,
+    }
 
-    correlativo_counter = 100000
-    comp_id_virtual = 1  # Para referenciar detalles antes del insert si autoincrement
+    comprobantes_chunk = []
+    detalles_chunk = []
+    pagos_chunk = []
 
-    curr_date = START_DATE
+    comp_id_virtual = 1
+    total_detalles_count = 0
     anomalias_anulados = 0
     anomalias_outliers_tiempo = 0
 
+    chunk_counter = 1
+    total_chunks_expected = TARGET_TICKETS // CHUNK_SIZE
+
+    print("  → Generando tickets y detalles en lotes masivos...")
+
+    curr_date = START_DATE
     while curr_date <= END_DATE:
         is_weekend = curr_date.weekday() >= 5
-        # En fines de semana hay 40% más de afluencia y compras
-        daily_tickets_count = int(tickets_per_day_base * (1.45 if is_weekend else 0.95))
+        daily_tickets_count = int(base_daily_tickets * (1.45 if is_weekend else 0.95))
+
         for _ in range(daily_tickets_count):
             available_tiendas = [t for t in [1, 2, 3] if t in cajas_by_tienda and cajas_by_tienda[t]]
-            weights = [50 if t == 1 else 30 if t == 2 else 20 for t in available_tiendas]
-            tienda_id = random.choices(available_tiendas, weights=weights)[0]
+            tienda_id = random.choices(available_tiendas, weights=[50, 30, 20])[0]
             caja_id = random.choice(cajas_by_tienda[tienda_id])
 
-            # DISTRIBUCIÓN DE HORAS PICO:
-            # 65% probabilidad de ocurrir en Horas Pico (18:00 - 21:00) o (13:00 - 15:00)
             rand_val = random.random()
             if rand_val < 0.65:
-                # Hora Pico de tarde/noche (18:00 a 21:00)
                 hora = random.randint(18, 20)
                 minuto = random.randint(0, 59)
                 segundo = random.randint(0, 59)
-                # Tiempos de atención y espera más altos por saturación
-                tiempo_espera = random.randint(240, 750)  # 4 a 12 min en cola
                 tiempo_atencion = random.randint(110, 320)
             elif rand_val < 0.85:
-                # Hora Normal / Almuerzo (13:00 a 16:00)
                 hora = random.randint(13, 15)
                 minuto = random.randint(0, 59)
                 segundo = random.randint(0, 59)
-                tiempo_espera = random.randint(60, 240)
                 tiempo_atencion = random.randint(80, 200)
             else:
-                # Hora Valle (10:00 a 12:59 o 21:00 a 22:00)
                 hora = random.choice([10, 11, 12, 21])
                 minuto = random.randint(0, 59)
                 segundo = random.randint(0, 59)
-                tiempo_espera = random.randint(20, 90)
                 tiempo_atencion = random.randint(60, 150)
 
             fecha_hora_emision = datetime(curr_date.year, curr_date.month, curr_date.day, hora, minuto, segundo)
             fecha_hora_inicio = fecha_hora_emision - timedelta(seconds=tiempo_atencion)
 
-            # Buscar sesión de caja adecuada
             sessions = asig_map.get((caja_id, curr_date.date()), [])
+            asig_id, emp_id = 1, 1
             if sessions:
-                asig_id, emp_id, _, _ = random.choice(sessions)
-            else:
-                asig_id, emp_id = 1, 1
+                for s_asig, s_emp, s_ini, s_fin in sessions:
+                    if s_ini <= fecha_hora_emision <= s_fin:
+                        asig_id, emp_id = s_asig, s_emp
+                        break
+                else:
+                    asig_id, emp_id, _, _ = sessions[0]
 
-            # Inyección de Anomalía 1: Outlier de tiempo de atención (1% de los casos)
+            # Inyección de Anomalías ETL
             if random.random() < 0.012:
                 anomalias_outliers_tiempo += 1
-                tiempo_atencion = random.choice([0, 3600, 4200])  # Error en caja express o caja congelada
+                tiempo_atencion = random.choice([0, 3600, 4200])
 
-            # Inyección de Anomalía 2: Comprobante Anulado o Devuelto (4.5% de los casos)
             if random.random() < 0.045:
                 estado = random.choice(["Anulado", "Devuelto"])
                 anomalias_anulados += 1
             else:
                 estado = "Emitido"
 
-            # Cliente (15% probabilidad de "Cliente Varios" o no identificado)
-            if random.random() < 0.15:
-                cliente_id = 1  # Clientes Varios (DNI 00000000)
-            else:
-                cliente_id = random.choice(client_ids)
+            cliente_id = precomputed_clients[client_idx_pointer]
+            client_idx_pointer += 1
+            es_titular = client_titular_map.get(cliente_id, False)
 
             tipo_comp = "Factura" if random.random() < 0.15 else "Boleta de Venta"
             serie = f"B00{tienda_id}" if tipo_comp == "Boleta de Venta" else f"F00{tienda_id}"
-            correlativo_counter += 1
+            correlativos[(tipo_comp, serie)] += 1
+            num_correlativo = correlativos[(tipo_comp, serie)]
 
-            # Generar líneas de detalle (1 a 5 items por ticket)
-            num_items = random.choices([1, 2, 3, 4, 5], weights=[25, 40, 20, 10, 5])[0]
+            # Canasta de compra (1 a 5 ítems por ticket)
+            num_items = random.choices([1, 2, 3, 4, 5], weights=[35, 35, 18, 8, 4])[0]
             ticket_subtotal = 0.0
             ticket_descuento = 0.0
-
             ticket_detalles = []
-            for _ in range(num_items):
-                prod_id, p_lista, c_costo = random.choice(products)
+
+            # Obtener ítems del pool muestreado con Pareto
+            ticket_prods = []
+            seen_pids = set()
+            while len(ticket_prods) < num_items:
+                candidate = sampled_product_pool[prod_pool_pointer]
+                prod_pool_pointer = (prod_pool_pointer + 1) % len(sampled_product_pool)
+                if candidate[0] not in seen_pids:
+                    seen_pids.add(candidate[0])
+                    ticket_prods.append(candidate)
+
+            for prod_id, p_lista, c_costo in ticket_prods:
                 cant = random.choices([1, 2, 3], weights=[80, 15, 5])[0]
-                
-                # Descuento ocasional por Tarjeta Ripley o promoción
-                desc_unit = float(p_lista) * 0.15 if random.random() < 0.25 else 0.0
+
+                if es_titular and random.random() < 0.35:
+                    desc_unit = float(p_lista) * random.choice([0.15, 0.20, 0.25])
+                elif random.random() < 0.10:
+                    desc_unit = float(p_lista) * 0.10
+                else:
+                    desc_unit = 0.0
+
                 p_venta = float(p_lista) - desc_unit
                 subtotal_linea = round(p_venta * cant, 2)
-
                 ticket_subtotal += subtotal_linea
                 ticket_descuento += round(desc_unit * cant, 2)
 
-                ticket_detalles.append((comp_id_virtual, prod_id, cant, round(p_venta, 2), float(c_costo), round(desc_unit, 2), subtotal_linea))
+                ticket_detalles.append((
+                    comp_id_virtual, prod_id, cant, round(p_venta, 2),
+                    float(c_costo), round(desc_unit, 2), subtotal_linea
+                ))
 
-            # Cálculo impositivo peruano (18% IGV)
             monto_total = round(ticket_subtotal, 2)
             subtotal_gravado = round(monto_total / 1.18, 2)
             igv = round(monto_total - subtotal_gravado, 2)
 
-            comprobantes_batch.append((
+            comprobantes_chunk.append((
                 comp_id_virtual, tienda_id, caja_id, emp_id, cliente_id, asig_id,
-                tipo_comp, serie, correlativo_counter,
+                tipo_comp, serie, num_correlativo,
                 fecha_hora_inicio, fecha_hora_emision, tiempo_atencion,
                 subtotal_gravado, igv, ticket_descuento, monto_total, estado
             ))
 
-            detalles_batch.extend(ticket_detalles)
+            detalles_chunk.extend(ticket_detalles)
 
-            # Pago del comprobante
-            metodo_pago = random.choice(payment_methods)
-            pagos_batch.append((
+            if es_titular and random.random() < 0.70:
+                metodo_pago = 1  # Tarjeta Ripley
+            else:
+                metodo_pago = random.choices([2, 3, 4, 5], weights=[35, 30, 15, 20])[0]
+
+            pagos_chunk.append((
                 comp_id_virtual, metodo_pago, monto_total,
                 f"AUTH-{random.randint(100000, 999999)}", fecha_hora_emision
             ))
 
             comp_id_virtual += 1
 
+            if len(comprobantes_chunk) >= CHUNK_SIZE:
+                _insert_chunk(conn, comprobantes_chunk, detalles_chunk, pagos_chunk)
+                total_detalles_count += len(detalles_chunk)
+                pct = int((chunk_counter / total_chunks_expected) * 100)
+                print(f"    [Bloque {chunk_counter:>2}/{total_chunks_expected}] {comp_id_virtual - 1:,} comprobantes insertados ({pct}%)...")
+                comprobantes_chunk = []
+                detalles_chunk = []
+                pagos_chunk = []
+                chunk_counter += 1
+
         curr_date += timedelta(days=1)
 
-    print(f"  ✓ Generados {len(comprobantes_batch)} comprobantes y {len(detalles_batch)} líneas de detalle.")
-    print(f"    - Anomalías inyectadas: {anomalias_anulados} anulados/devueltos, {anomalias_outliers_tiempo} outliers de tiempo.")
+    if comprobantes_chunk:
+        _insert_chunk(conn, comprobantes_chunk, detalles_chunk, pagos_chunk)
+        total_detalles_count += len(detalles_chunk)
 
-    # Inserción masiva en lotes de 1,000 registros
-    print("  → Insertando en MySQL (lotes masivos para alto rendimiento)...")
-    batch_size = 1000
+    total_tickets_inserted = comp_id_virtual - 1
+    print(f"  ✓ {total_tickets_inserted:,} comprobantes y {total_detalles_count:,} detalles insertados.")
+    print(f"    - Anomalías controladas: {anomalias_anulados:,} anulados/devueltos, {anomalias_outliers_tiempo:,} outliers de tiempo.")
+
+
+def _insert_chunk(conn, comprobantes, detalles, pagos):
+    """Inserta un bloque transaccional con alto desempeño utilizando executemany."""
     with conn.cursor() as cur:
-        # 1. Comprobantes
-        for i in range(0, len(comprobantes_batch), batch_size):
-            chunk = comprobantes_batch[i:i + batch_size]
-            cur.executemany(
-                """
-                INSERT INTO `COMPROBANTE_PAGO`
-                (`id_comprobante`, `id_tienda`, `id_caja`, `id_empleado`, `id_cliente`, `id_asignacion`,
-                 `tipo_comprobante`, `serie`, `numero_correlativo`, `fecha_hora_inicio_atencion`,
-                 `fecha_hora_emision`, `tiempo_atencion_segundos`, `subtotal_gravado`, `igv`,
-                 `total_descuento`, `monto_total`, `estado`)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                chunk,
-            )
+        cur.executemany(
+            """
+            INSERT INTO `COMPROBANTE_PAGO`
+            (`id_comprobante`, `id_tienda`, `id_caja`, `id_empleado`, `id_cliente`, `id_asignacion`,
+             `tipo_comprobante`, `serie`, `numero_correlativo`, `fecha_hora_inicio_atencion`,
+             `fecha_hora_emision`, `tiempo_atencion_segundos`, `subtotal_gravado`, `igv`,
+             `total_descuento`, `monto_total`, `estado`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            comprobantes,
+        )
 
-        # 2. Detalles
-        for i in range(0, len(detalles_batch), batch_size):
-            chunk = detalles_batch[i:i + batch_size]
-            cur.executemany(
-                """
-                INSERT INTO `DETALLE_COMPROBANTE`
-                (`id_comprobante`, `id_producto`, `cantidad`, `precio_unitario_venta`,
-                 `costo_unitario_historico`, `descuento_unitario`, `subtotal_linea`)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """,
-                chunk,
-            )
+        cur.executemany(
+            """
+            INSERT INTO `DETALLE_COMPROBANTE`
+            (`id_comprobante`, `id_producto`, `cantidad`, `precio_unitario_venta`,
+             `costo_unitario_historico`, `descuento_unitario`, `subtotal_linea`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            detalles,
+        )
 
-        # 3. Pagos
-        for i in range(0, len(pagos_batch), batch_size):
-            chunk = pagos_batch[i:i + batch_size]
-            cur.executemany(
-                """
-                INSERT INTO `PAGO_COMPROBANTE`
-                (`id_comprobante`, `id_metodo_pago`, `monto_pagado`, `numero_operacion_pos`, `fecha_hora_pago`)
-                VALUES (%s, %s, %s, %s, %s)
-                """,
-                chunk,
-            )
-
+        cur.executemany(
+            """
+            INSERT INTO `PAGO_COMPROBANTE`
+            (`id_comprobante`, `id_metodo_pago`, `monto_pagado`, `numero_operacion_pos`, `fecha_hora_pago`)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            pagos,
+        )
     conn.commit()
 
 
@@ -585,27 +1025,25 @@ def generate_iot_telemetry(conn):
 
     while curr_date <= END_DATE:
         is_weekend = curr_date.weekday() >= 5
-        base_mult = 1.35 if is_weekend else 1.0
+        base_mult = 1.45 if is_weekend else 1.0
 
         for sens_id, _ in sensors:
-            # Horario comercial: 10:00 a 22:00 en intervalos de 30 minutos
             for h in range(10, 22):
                 for m in [0, 30]:
                     dt = datetime(curr_date.year, curr_date.month, curr_date.day, h, m, 0)
 
-                    # Flujo según hora pico (18:00 a 21:00 mayor afluencia)
                     if 18 <= h <= 20:
-                        entradas = int(random.randint(180, 320) * base_mult)
-                        salidas = int(random.randint(70, 160) * base_mult)
-                        aforo = int(random.randint(1400, 2800) * base_mult)
+                        entradas = int(random.randint(220, 380) * base_mult)
+                        salidas = int(random.randint(90, 180) * base_mult)
+                        aforo = int(random.randint(1800, 3200) * base_mult)
                     elif 13 <= h <= 15:
-                        entradas = int(random.randint(90, 160) * base_mult)
-                        salidas = int(random.randint(80, 140) * base_mult)
-                        aforo = int(random.randint(800, 1500) * base_mult)
+                        entradas = int(random.randint(110, 190) * base_mult)
+                        salidas = int(random.randint(95, 160) * base_mult)
+                        aforo = int(random.randint(950, 1800) * base_mult)
                     else:
-                        entradas = int(random.randint(30, 80) * base_mult)
-                        salidas = int(random.randint(25, 75) * base_mult)
-                        aforo = int(random.randint(350, 800) * base_mult)
+                        entradas = int(random.randint(40, 95) * base_mult)
+                        salidas = int(random.randint(35, 90) * base_mult)
+                        aforo = int(random.randint(400, 950) * base_mult)
 
                     iot_batch.append((sens_id, dt, entradas, salidas, aforo))
 
@@ -616,8 +1054,8 @@ def generate_iot_telemetry(conn):
         cur.execute("TRUNCATE TABLE `LOG_AFLUENCIA_IOT`;")
         cur.execute("SET FOREIGN_KEY_CHECKS = 1;")
 
-        for i in range(0, len(iot_batch), 1000):
-            chunk = iot_batch[i:i + 1000]
+        for i in range(0, len(iot_batch), 2000):
+            chunk = iot_batch[i:i + 2000]
             cur.executemany(
                 """
                 INSERT INTO `LOG_AFLUENCIA_IOT`
@@ -628,14 +1066,16 @@ def generate_iot_telemetry(conn):
             )
 
     conn.commit()
-    print(f"  ✓ {len(iot_batch)} lecturas de telemetría IoT insertadas exitosamente.")
+    print(f"  ✓ {len(iot_batch):,} lecturas de telemetría IoT insertadas exitosamente.")
 
 
 def main():
     print("=" * 70)
-    print("🚀 GENERADOR DE DATOS DE ALTA CARGA - PROYECTO RIPLEY IN")
-    print(f"🎯 Meta: ~{TARGET_FACT_ROWS} filas en DETALLE_COMPROBANTE (FACT_VENTAS)")
-    print(f"📅 Rango de fechas: {START_DATE.strftime('%Y-%m-%d')} a {END_DATE.strftime('%Y-%m-%d')}")
+    print("🚀 GENERADOR MASIVO DE DATOS OLTP - RIPLEY BUSINESS INTELLIGENCE")
+    print(f"🎯 Meta Comprobantes: ~{TARGET_TICKETS:,} tickets")
+    print(f"📦 Catálogo de Productos: ~{TARGET_PRODUCTS:,} SKUs")
+    print(f"👥 Padrón de Clientes: ~{NUM_CLIENTES:,} registros")
+    print(f"📅 Rango de Fechas: {START_DATE.strftime('%Y-%m-%d')} a {END_DATE.strftime('%Y-%m-%d')} (62 días)")
     print("=" * 70)
 
     try:
@@ -650,18 +1090,42 @@ def main():
         generate_iot_telemetry(conn)
 
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM `DETALLE_COMPROBANTE`;")
-            total_detalles = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM `LINEA_COMERCIAL`;")
+            total_lineas = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM `CATEGORIA`;")
+            total_categorias = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM `SUBCATEGORIA`;")
+            total_subcategorias = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM `MARCA`;")
+            total_marcas = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM `PROVEEDOR`;")
+            total_proveedores = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM `PRODUCTO`;")
+            total_productos = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM `INVENTARIO_TIENDA`;")
+            total_inventario = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM `CLIENTE`;")
+            total_clientes = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM `COMPROBANTE_PAGO`;")
             total_tickets = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM `DETALLE_COMPROBANTE`;")
+            total_detalles = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM `LOG_AFLUENCIA_IOT`;")
             total_iot = cur.fetchone()[0]
 
         print("\n" + "=" * 70)
-        print("🎉 GENERACIÓN Y CARGA MASIVA COMPLETADA")
-        print(f"  📦 Total Comprobantes (Tickets):     {total_tickets:,}")
-        print(f"  🛒 Total DETALLE_COMPROBANTE:       {total_detalles:,} (alimentará FACT_VENTAS)")
-        print(f"  📡 Total Registros IoT:             {total_iot:,} (alimentará FACT_AFLUENCIA_TIENDA)")
+        print("🎉 GENERACIÓN Y CARGA MASIVA COMPLETADA CON ÉXITO")
+        print(f"  🏢 Líneas Comerciales:              {total_lineas}")
+        print(f"  📂 Categorías de Producto:          {total_categorias}")
+        print(f"  🏷️  Subcategorías:                   {total_subcategorias}")
+        print(f"  🏷️  Marcas (Propias y Externas):     {total_marcas}")
+        print(f"  🏭 Proveedores Homologados:         {total_proveedores}")
+        print(f"  📦 Catálogo Total PRODUCTO:         {total_productos:,}")
+        print(f"  🏬 Registros INVENTARIO_TIENDA:     {total_inventario:,}")
+        print(f"  👥 Total CLIENTE:                   {total_clientes:,}")
+        print(f"  🧾 Total COMPROBANTE_PAGO:          {total_tickets:,}")
+        print(f"  🛒 Total DETALLE_COMPROBANTE:       {total_detalles:,}")
+        print(f"  📡 Total LOG_AFLUENCIA_IOT:         {total_iot:,}")
         print("=" * 70)
 
     finally:
