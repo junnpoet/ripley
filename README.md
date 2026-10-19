@@ -32,7 +32,8 @@ El repositorio integra tanto la **base de datos operacional (OLTP)** en 3NF como
 ├── scripts/
 │   ├── oltp/
 │   │   ├── reset_db.py          # Limpieza y recreación de tablas OLTP en 3NF
-│   │   ├── generate_seed_data.py# Generador masivo de transacciones e IoT (~11,000 hechos)
+│   │   ├── generate_seed_data.py# Generador masivo de transacciones e IoT (~50,000 detalles y cuellos de botella)
+│   │   ├── summary_db.py        # Resumen en consola de entidades y conteo de registros (OLTP y DW)
 │   │   └── export_to_excel.py   # Exportación de 24 tablas OLTP a Excel multi-hoja
 │   └── dw/
 │       ├── reset_dw.py          # Limpieza y recreación de tablas DW con comodines (-1)
@@ -68,7 +69,8 @@ make help
 | Comando | Acción |
 | :--- | :--- |
 | `make oltp-reset` | **Reinicia la BD OLTP** recreando las 24 tablas en 3NF desde cero. |
-| `make oltp-seed` | **Puebla la BD OLTP** generando catálogos y ~11,000 hechos con horas pico y anomalías. |
+| `make oltp-seed` | **Puebla la BD OLTP** generando catálogos y ~50,000 detalles transaccionales con cuellos de botella en horas pico. |
+| `make oltp-summary` | **Muestra resumen en consola** con el conteo de filas de las 24 tablas de `ripley_oltp` sin generar Excel. |
 | `make oltp-export` | **Exporta las 24 tablas OLTP** a `exports/ripley_oltp_data.xlsx`. |
 
 ### Comandos DW (Data Warehouse `ripley_dw`)
@@ -76,9 +78,16 @@ make help
 | :--- | :--- |
 | `make dw-reset` | **Reinicia el DW** recreando 8 dimensiones, 2 hechos y registros comodín `-1`. |
 | `make dw-seed-tiempo` | **Puebla las dimensiones temporales** estáticas (`DIM_FECHA` y `DIM_HORA`). |
+| `make dw-summary` | **Muestra resumen en consola** con el conteo de filas de las 10 tablas de `ripley_dw`. |
 | `make dw-export` | **Exporta las 10 tablas DW** a `exports/ripley_dw_data.xlsx`. |
 
-*(Nota: Los comandos `make db-reset`, `make seed-data` y `make export-excel` se mantienen como alias funcionales de OLTP por retrocompatibilidad).*
+### Comandos Consolidados y Utilitarios
+| Comando | Acción |
+| :--- | :--- |
+| `make db-summary` | **Resumen consolidado en consola** de ambas bases de datos (`ripley_oltp` y `ripley_dw`). |
+| `make summary` | Alias rápido para `make oltp-summary`. |
+
+*(Nota: Los comandos `make db-reset`, `make seed-data`, `make export-excel` y `make summary` se mantienen como alias funcionales por conveniencia).*
 
 > **Soporte Multiplataforma (Linux / Windows):**
 > El `Makefile` detecta automáticamente el sistema operativo:

@@ -23,9 +23,9 @@ DOCKER ?= docker
 
 .PHONY: help venv clean \
         db-up db-down db-ps db-logs db-shell db-shell-dw db-root \
-        oltp-reset oltp-seed oltp-export \
-        dw-reset dw-seed-tiempo dw-export \
-        db-reset seed-data export-excel
+        oltp-reset oltp-seed oltp-export oltp-summary \
+        dw-reset dw-seed-tiempo dw-export dw-summary \
+        db-reset seed-data export-excel db-summary summary
 
 help:
 	@echo "=================================================================="
@@ -42,15 +42,18 @@ help:
 	@echo ""
 	@echo "  [TRANSACCIONAL - OLTP (ripley_oltp)]"
 	@echo "  make oltp-reset     - Reinicia la BD OLTP (recrea 24 tablas en 3NF)"
-	@echo "  make oltp-seed      - Puebla maestros y ~11,000 transacciones OLTP"
+	@echo "  make oltp-seed      - Puebla maestros y ~50,000 detalles transaccionales"
+	@echo "  make oltp-summary   - Muestra resumen y conteo de filas de la BD OLTP"
 	@echo "  make oltp-export    - Exporta las 24 tablas OLTP a Excel (.xlsx)"
 	@echo ""
 	@echo "  [ANALÍTICO - DATA WAREHOUSE (ripley_dw)]"
 	@echo "  make dw-reset       - Reinicia el DW (esquema Kimball con comodines -1)"
 	@echo "  make dw-seed-tiempo - Puebla DIM_FECHA (2025-2027) y DIM_HORA (1440 min)"
+	@echo "  make dw-summary     - Muestra resumen y conteo de filas de Ripley DW"
 	@echo "  make dw-export      - Exporta las 10 tablas del DW a Excel (.xlsx)"
 	@echo ""
-	@echo "  [UTILITARIOS]"
+	@echo "  [UTILITARIOS & RESUMEN]"
+	@echo "  make db-summary     - Resumen consolidado de ambas bases de datos (OLTP y DW)"
 	@echo "  make venv           - Prepara entorno virtual Python y dependencias"
 	@echo "  make clean          - Elimina cache y entorno virtual"
 	@echo "=================================================================="
@@ -101,10 +104,16 @@ oltp-seed: venv
 oltp-export: venv
 	@$(PYTHON) scripts/oltp/export_to_excel.py
 
+oltp-summary: venv
+	@$(PYTHON) scripts/oltp/summary_db.py
+
 # Alias de compatibilidad hacia atrás
 db-reset: oltp-reset
 seed-data: oltp-seed
 export-excel: oltp-export
+summary: oltp-summary
+db-summary: venv
+	@$(PYTHON) scripts/oltp/summary_db.py --all
 
 # -----------------------------------------------------------------------------
 # DATA WAREHOUSE DIMENSIONAL (DW)
@@ -117,6 +126,9 @@ dw-seed-tiempo: venv
 
 dw-export: venv
 	@$(PYTHON) scripts/dw/export_dw_to_excel.py
+
+dw-summary: venv
+	@$(PYTHON) scripts/oltp/summary_db.py --dw
 
 # -----------------------------------------------------------------------------
 # LIMPIEZA
