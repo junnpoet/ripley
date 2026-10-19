@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
 Generador masivo de datos transaccionales para Ripley OLTP.
-Produce catálogo a escala de tienda por departamento (~5,000 productos, 38 subcategorías,
-44 marcas, 25 proveedores, 15,000 registros de inventario), padrón de clientes (~6,000 registros),
-dotación de personal por sede, transacciones comerciales masivas (~50,000 comprobantes con
-distribución de Pareto en ventas y horas pico) y telemetría IoT sincronizada.
+Produce catálogo a escala de tienda por departamento (~5,000 productos, 36 subcategorías,
+44 marcas, 25 proveedores, 15,000 registros de inventario), padrón de clientes (~3,500 registros),
+dotación de personal por sede, transacciones comerciales masivas (~50,000 líneas en DETALLE_COMPROBANTE
+y ~23,700 comprobantes en 1 mes de campaña) y telemetría IoT sincronizada con anomalías controladas
+para justificar el proceso de transformación (ETL) en Power BI Web (Power Query Online).
 """
 
 import os
@@ -22,12 +23,15 @@ DB_USER = os.getenv("MYSQL_USER", "ripley_user")
 DB_PASS = os.getenv("MYSQL_PASSWORD", "ripley_pass")
 DB_NAME = os.getenv("MYSQL_DATABASE", "ripley_oltp")
 
-TARGET_PRODUCTS = 5000       # Catálogo ampliado de retail multidepartamental
-TARGET_TICKETS = 50000       # Transacciones comerciales objetivo
-NUM_CLIENTES = 6000          # Base de clientes registrados
-CHUNK_SIZE = 5000            # Lotes de inserción masiva
+# Configuración del Período de Campaña: Julio 2026 (31 días calendario)
 START_DATE = datetime(2026, 7, 1)
-END_DATE = datetime(2026, 8, 31)  # 62 días de operación comercial
+END_DATE = datetime(2026, 7, 31)
+
+TARGET_PRODUCTS = 5000       # Catálogo ampliado de retail multidepartamental
+TARGET_DETALLES = 50000      # Meta rectora: ~50,000 registros en DETALLE_COMPROBANTE
+TARGET_TICKETS = int(TARGET_DETALLES / 2.11)  # ~23,696 tickets (promedio 2.11 ítems/ticket)
+NUM_CLIENTES = 3500          # Base de clientes registrados
+CHUNK_SIZE = 4000            # Lotes de inserción masiva para memoria plana
 
 
 def get_connection():
@@ -183,86 +187,64 @@ BASE_LINEAS = [
 ]
 
 BASE_CATEGORIAS = [
-    # Línea 1: Moda y Calzado
     (1, 1, "Moda Mujer"),
     (2, 1, "Moda Hombre"),
     (3, 1, "Calzado y Zapatillas"),
-    # Línea 2: Electro y Tecnología
     (4, 2, "Televisores y Audio"),
     (5, 2, "Smartphones y Telefonía"),
     (6, 2, "Cómputo y Laptops"),
     (7, 2, "Electrohogar y Línea Blanca"),
-    # Línea 3: Decohogar
     (8, 3, "Dormitorio y Colchones"),
     (9, 3, "Muebles de Sala y Comedor"),
     (10, 3, "Menaje y Cocina"),
-    # Línea 4: Belleza y Perfumería
     (11, 4, "Perfumería y Fragancias"),
     (12, 4, "Cuidado Facial y Maquillaje"),
-    # Línea 5: Deportes y Outdoor
     (13, 5, "Ropa y Calzado Deportivo"),
     (14, 5, "Máquinas y Fitness"),
-    # Línea 6: Infantil y Juguetería
     (15, 6, "Juguetes y Juegos de Mesa"),
     (16, 6, "Moda Infantil y Bebés"),
 ]
 
 BASE_SUBCATEGORIAS = [
-    # Moda Mujer
     (1, 1, "Jeans y Denim Mujer"),
     (2, 1, "Blusas, Tops y Polos Mujer"),
     (3, 1, "Casacas y Abrigos Mujer"),
     (4, 1, "Vestidos y Faldas"),
-    # Moda Hombre
     (5, 2, "Jeans y Pantalones Hombre"),
     (6, 2, "Polos y Camisas Hombre"),
     (7, 2, "Casacas y Chompas Hombre"),
-    # Calzado
     (8, 3, "Zapatillas Urbanas"),
     (9, 3, "Zapatos y Botines"),
-    # Televisores y Audio
     (10, 4, "Smart TV 4K, OLED y QLED"),
     (11, 4, "Barras de Sonido y Audio"),
-    # Smartphones y Telefonía
     (12, 5, "Smartphones Gama Alta y Media"),
     (13, 5, "Smartwatches y Wearables"),
-    # Cómputo
     (14, 6, "Laptops y Notebooks"),
     (15, 6, "Monitores y Accesorios"),
-    # Electrohogar
     (16, 7, "Refrigeradoras y Congeladoras"),
     (17, 7, "Lavadoras y Secadoras"),
     (18, 7, "Cocinas, Hornos y Microondas"),
-    # Dormitorio
     (19, 8, "Colchones y Box Spring"),
     (20, 8, "Ropa de Cama, Sábanas y Plumones"),
     (21, 8, "Almohadas y Accesorios de Cama"),
-    # Muebles
     (22, 9, "Sofás, Seccionales y Sillones"),
     (23, 9, "Juegos de Comedor y Sillas"),
-    # Menaje
     (24, 10, "Baterías de Cocina y Sartenes"),
     (25, 10, "Vajilla, Vasos y Cristalería"),
-    # Perfumería
     (26, 11, "Perfumes y Fragancias Mujer"),
     (27, 11, "Perfumes y Fragancias Hombre"),
-    # Cuidado Facial
     (28, 12, "Tratamiento Facial y Cremas"),
-    # Deportes
     (29, 13, "Zapatillas de Running"),
     (30, 13, "Ropa Deportiva Training"),
     (31, 14, "Trotadoras y Máquinas de Ejercicio"),
     (32, 14, "Mancuernas y Accesorios de Fuerza"),
-    # Juguetes
     (33, 15, "Figuras de Acción y Muñecas"),
     (34, 15, "Juegos de Construcción y Mesa"),
-    # Infantil
     (35, 16, "Ropa y Bodys para Bebés"),
     (36, 16, "Coches y Sillas para Auto"),
 ]
 
 BASE_MARCAS = [
-    # Marcas Propias Ripley (10)
     (1, "Marquis", True),
     (2, "Barbados", True),
     (3, "Index", True),
@@ -273,7 +255,6 @@ BASE_MARCAS = [
     (8, "Cloudbreak", True),
     (9, "Regatta", True),
     (10, "Navigata", True),
-    # Marcas Comerciales Externas (34)
     (11, "Samsung", False),
     (12, "Apple", False),
     (13, "LG", False),
@@ -344,7 +325,13 @@ BASE_PROVEEDORES = [
 # -----------------------------------------------------------------------------
 
 def generate_clients_dataset(count=NUM_CLIENTES):
-    """Genera el padrón diverso y representativo de clientes peruanos."""
+    """
+    Genera el padrón diverso de clientes con anomalías controladas para Power BI:
+    - DNIs con ceros a la izquierda (requiere forzar tipo Texto).
+    - Espacios residuales en nombres (requiere Text.Trim).
+    - Campos nulos de contacto en compradores no recurrentes (requiere reemplazar nulos).
+    - Inconsistencia de puntos en clientes sin tarjeta (requiere columna condicional).
+    """
     first_names_m = [
         "Carlos", "Luis", "Juan", "José", "Miguel", "Jorge", "Diego", "Fernando", "Alejandro", "Mateo",
         "Sebastián", "Rodrigo", "Joaquín", "Esteban", "Gabriel", "Renzo", "Christian", "Álvaro", "Víctor", "Manuel",
@@ -379,12 +366,20 @@ def generate_clients_dataset(count=NUM_CLIENTES):
         sn2 = random.choice(surnames)
         apellidos = f"{sn1} {sn2}"
 
+        # Anomalía ETL 1: 5% de nombres con espacios residuales para justificar Text.Trim
+        if random.random() < 0.05:
+            fn = f"  {fn}  "
+
         doc_rand = random.random()
         if doc_rand < 0.82:
             tipo_doc = 1  # DNI
-            doc_num = str(random.randint(10000000, 79999999))
+            # Anomalía ETL 2: 12% de DNIs con cero a la izquierda para justificar tipo TEXTO
+            if random.random() < 0.12:
+                doc_num = f"0{random.randint(1000000, 9999999)}"
+            else:
+                doc_num = str(random.randint(10000000, 79999999))
         elif doc_rand < 0.92:
-            tipo_doc = 3  # RUC
+            tipo_doc = 3  # RUC (Persona natural 10xxxxxxxx)
             doc_num = f"10{random.randint(10000000, 79999999)}{random.randint(0, 9)}"
         elif doc_rand < 0.97:
             tipo_doc = 2  # Carnet Extranjería
@@ -400,18 +395,29 @@ def generate_clients_dataset(count=NUM_CLIENTES):
         tipo_cli_rand = random.random()
         if tipo_cli_rand < 0.60:
             id_tipo_cliente = 1
-            es_titular_tarjeta = random.random() < 0.08
+            es_titular_tarjeta = False
+            # Anomalía ETL 3: 2.5% clientes regulares con puntos erróneos para columna condicional
+            puntos = random.randint(150, 800) if random.random() < 0.025 else 0
         elif tipo_cli_rand < 0.95:
             id_tipo_cliente = 2
             es_titular_tarjeta = True
+            puntos = random.randint(800, 16000)
         else:
             id_tipo_cliente = 3
             es_titular_tarjeta = True
+            puntos = random.randint(1500, 22000)
 
-        puntos = random.randint(300, 16000) if es_titular_tarjeta else (random.randint(0, 400) if random.random() < 0.20 else 0)
-        domain = random.choice(email_domains)
-        email = f"{fn.lower()}.{sn1.lower()}{random.randint(1, 999)}@{domain}"
-        telefono = f"9{random.randint(10000000, 99999999)}"
+        # Anomalía ETL 4: 6% clientes sin correo o teléfono para justificar reemplazo de nulos
+        if random.random() < 0.06:
+            email = None
+            telefono = None
+        else:
+            domain = random.choice(email_domains)
+            # Mezcla de mayúsculas para justificar Text.Lower
+            fn_clean = fn.strip().lower()
+            email = f"{fn_clean}.{sn1.lower()}{random.randint(1, 999)}@{domain}"
+            telefono = f"9{random.randint(10000000, 99999999)}"
+
         reg_dt = start_reg + timedelta(days=random.randint(0, delta_days), seconds=random.randint(0, 86399))
 
         clients.append((
@@ -423,15 +429,9 @@ def generate_clients_dataset(count=NUM_CLIENTES):
 
 
 def generate_products_dataset(target_count=TARGET_PRODUCTS):
-    """
-    Genera 5,000 productos realistas cubriendo los 6 departamentos comerciales de Ripley.
-    Asigna precios coherentes, márgenes mayoristas, marcas auténticas y reglas de despacho.
-    """
-    # Mapeo de marcas
+    """Genera 5,000 productos realistas cubriendo los 6 departamentos de Ripley."""
     brand_names = {b[0]: b[1] for b in BASE_MARCAS}
 
-    # Definición de plantillas por subcategoría:
-    # (id_subcat, [marcas], [proveedores], plantilla_nombre, precio_min, precio_max, requiere_despacho)
     templates = [
         # Moda Mujer
         (1, [1, 3, 5, 7], [2, 21], "Jean {brand} {fit} Denim {color}", 89.90, 199.90, False),
@@ -442,7 +442,7 @@ def generate_products_dataset(target_count=TARGET_PRODUCTS):
         (5, [2, 4, 8, 9, 10], [2, 21], "Jean {brand} Regular Fit Denim {color}", 89.90, 189.90, False),
         (6, [2, 4, 8, 9, 10], [2, 21], "Polo {brand} Algodón Pima Cuello {neck} {color}", 39.90, 89.90, False),
         (7, [2, 4, 8, 9, 10], [2, 21], "Casaca {brand} Bomber Urbana {color}", 139.90, 299.90, False),
-        # Calzado Urbano y Formal
+        # Calzado
         (8, [23, 24, 25, 27, 28, 29], [3, 9, 10], "Zapatillas {brand} Urbanas {model} {color}", 179.90, 429.90, False),
         (9, [1, 2, 5], [2], "Zapatos {brand} Formales de Cuero {color}", 149.90, 289.90, False),
         # Televisores y Audio
@@ -451,7 +451,7 @@ def generate_products_dataset(target_count=TARGET_PRODUCTS):
         # Smartphones y Wearables
         (12, [11, 12, 15], [1, 4, 24], "Smartphone {brand} {phone_line} {storage}GB {color}", 899.00, 5299.00, False),
         (13, [11, 12, 15], [1, 4, 24], "Smartwatch {brand} {watch_line} GPS {dial_size}mm", 499.00, 1999.00, False),
-        # Cómputo y Laptops
+        # Cómputo
         (14, [16, 17, 18, 12], [4, 13, 14], "Laptop {brand} {lap_line} 15.6 Core i{core} {ram}GB RAM", 1799.00, 5499.00, False),
         (15, [11, 13, 16], [1, 8, 13], "Monitor Gamer {brand} {mon_size} Full HD 144Hz", 599.00, 1599.00, False),
         # Electrohogar / Línea Blanca
@@ -462,22 +462,22 @@ def generate_products_dataset(target_count=TARGET_PRODUCTS):
         (19, [30, 31, 32, 33], [5, 6, 22], "Colchón {brand} Ortopédico Ergo {bed_size}", 799.00, 2699.00, True),
         (20, [1, 2, 6], [2], "Juego de Sábanas {brand} 300 Hilos {bed_size}", 99.90, 229.90, False),
         (21, [6, 30, 31], [5, 6], "Almohada {brand} Memory Foam Cervical Antialérgica", 59.90, 149.90, False),
-        # Muebles de Sala y Comedor
+        # Muebles
         (22, [6], [2], "Sofá Seccional {brand} Tela Lino {seats} Cuerpos {color}", 1299.00, 3599.00, True),
         (23, [6], [2], "Juego de Comedor {brand} 6 Sillas Madera Paraíso", 1499.00, 3199.00, True),
-        # Menaje y Cocina
+        # Menaje
         (24, [19, 20], [11, 12], "Batería de Cocina {brand} Antiadherente {pieces} Piezas", 189.90, 499.90, False),
         (25, [6], [2], "Juego de Vajilla {brand} Cerámica {pieces_v} Piezas", 119.90, 299.90, False),
-        # Perfumería y Cuidado Personal
+        # Perfumería y Cuidado Facial
         (26, [34, 35, 36, 38], [15, 16], "Perfume {brand} {perf_f} Eau de Parfum {ml}ml", 199.90, 589.90, False),
         (27, [34, 35, 36], [15, 16], "Perfume {brand} {perf_m} Eau de Toilette {ml}ml", 189.90, 549.90, False),
         (28, [37, 38], [15], "Crema Facial {brand} Tratamiento Antiedad Revitalift", 79.90, 249.90, False),
-        # Deportes y Fitness
+        # Deportes
         (29, [23, 24, 25, 26], [3, 9, 10], "Zapatillas {brand} Running {run_model} Pro", 229.90, 549.90, False),
         (30, [23, 24, 25, 26], [3, 9, 10], "Polo Deportivo {brand} Dri-FIT Transpirable {color}", 69.90, 149.90, False),
         (31, [42, 43], [20], "Trotadora Eléctrica {brand} Motor {hp}HP Inclinación Digital", 1699.00, 4299.00, True),
         (32, [42, 43], [20], "Set Mancuernas Ajustables {brand} {kg_m}Kg con Soporte", 149.90, 499.90, False),
-        # Infantil y Juguetería
+        # Infantil
         (33, [39, 40, 41], [17, 18, 19], "Figura de Acción {brand} {toy_line} Articulada", 49.90, 189.90, False),
         (34, [39, 40], [17, 18], "Set de Construcción {brand} Edición Coleccionista", 89.90, 429.90, False),
         (35, [1, 7, 44], [2, 25], "Pack 3 Bodys Algodón Orgánico {brand} Bebé {color}", 49.90, 99.90, False),
@@ -505,8 +505,6 @@ def generate_products_dataset(target_count=TARGET_PRODUCTS):
     perf_m = ["Sauvage", "1 Million", "Invictus", "Acqua Di Gio", "212 Men Heroes"]
 
     products = []
-    used_skus = set()
-    used_barcodes = set()
 
     for i in range(1, target_count + 1):
         tmpl = random.choice(templates)
@@ -519,7 +517,6 @@ def generate_products_dataset(target_count=TARGET_PRODUCTS):
         barcode = f"775{i:08d}"
 
         price = round(random.uniform(tmpl[4], tmpl[5]), 2)
-        # Margen comercial estándar: costo 42% a 60% del precio de venta
         cost = round(price * random.uniform(0.42, 0.60), 2)
         requiere_despacho = tmpl[6]
 
@@ -568,8 +565,8 @@ def generate_products_dataset(target_count=TARGET_PRODUCTS):
 
 
 def setup_masters(conn):
-    """Puebla de forma completa y autosuficiente todos los catálogos maestros y el inventario."""
-    print("📋 Verificando y sincronizando catálogos maestros...")
+    """Puebla catálogos maestros, clientes, productos e inventarios."""
+    print("📋 Sincronizando catálogos maestros y padrón de clientes...")
     with conn.cursor() as cur:
         cur.execute("SET NAMES utf8mb4;")
         cur.execute("SET FOREIGN_KEY_CHECKS = 0;")
@@ -581,7 +578,7 @@ def setup_masters(conn):
         cur.executemany("INSERT IGNORE INTO `ROL_EMPLEADO` (`id_rol`, `nombre_rol`) VALUES (%s, %s)", BASE_ROLES)
         cur.executemany("INSERT IGNORE INTO `CAJA_POS` (`id_tienda`, `numero_caja`, `tipo_caja`, `piso_ubicacion`, `mac_address`) VALUES (%s, %s, %s, %s, %s)", ALL_CAJAS)
 
-        # Jerarquía Comercial: Líneas, Categorías, Subcategorías, Marcas y Proveedores
+        # Jerarquía Comercial
         cur.execute("TRUNCATE TABLE `SUBCATEGORIA`;")
         cur.execute("TRUNCATE TABLE `CATEGORIA`;")
         cur.execute("TRUNCATE TABLE `LINEA_COMERCIAL`;")
@@ -594,28 +591,21 @@ def setup_masters(conn):
         cur.executemany("INSERT INTO `SUBCATEGORIA` (`id_subcategoria`, `id_categoria`, `nombre_subcategoria`) VALUES (%s, %s, %s)", BASE_SUBCATEGORIAS)
         cur.executemany("INSERT INTO `MARCA` (`id_marca`, `nombre_marca`, `es_marca_propia`) VALUES (%s, %s, %s)", BASE_MARCAS)
 
-        # Catálogo Ampliado de Productos (~5,000 SKUs)
-        cur.execute("SELECT COUNT(*) FROM `PRODUCTO`;")
-        current_prod_count = cur.fetchone()[0]
+        # Catálogo de 5,000 Productos
+        print(f"  → Generando catálogo masivo de {TARGET_PRODUCTS:,} productos...")
+        products_data = generate_products_dataset(TARGET_PRODUCTS)
+        cur.execute("TRUNCATE TABLE `PRODUCTO`;")
 
-        if current_prod_count < TARGET_PRODUCTS:
-            print(f"  → Generando catálogo masivo de {TARGET_PRODUCTS:,} productos...")
-            products_data = generate_products_dataset(TARGET_PRODUCTS)
-            cur.execute("TRUNCATE TABLE `PRODUCTO`;")
+        insert_prod_sql = """
+            INSERT INTO `PRODUCTO`
+            (`id_producto`, `sku`, `codigo_barras`, `nombre_producto`, `id_subcategoria`, `id_marca`,
+             `id_proveedor`, `precio_lista`, `costo_estandar`, `requiere_despacho`, `estado`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        for i in range(0, len(products_data), 1000):
+            cur.executemany(insert_prod_sql, products_data[i:i + 1000])
 
-            insert_prod_sql = """
-                INSERT INTO `PRODUCTO`
-                (`id_producto`, `sku`, `codigo_barras`, `nombre_producto`, `id_subcategoria`, `id_marca`,
-                 `id_proveedor`, `precio_lista`, `costo_estandar`, `requiere_despacho`, `estado`)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """
-            for i in range(0, len(products_data), 1000):
-                cur.executemany(insert_prod_sql, products_data[i:i + 1000])
-            print(f"  ✓ {len(products_data):,} productos cargados exitosamente.")
-        else:
-            print(f"  ✓ Catálogo de productos ya cuenta con {current_prod_count:,} registros.")
-
-        # Tablas de Apoyo de Clientes, Documentos y Medios de Pago
+        # Catálogos de Soporte
         cur.executemany("INSERT IGNORE INTO `TIPO_DOCUMENTO` (`id_tipo_doc`, `codigo_sunat`, `descripcion`) VALUES (%s, %s, %s)", BASE_TIPOS_DOC)
         cur.executemany("INSERT IGNORE INTO `TIPO_CLIENTE` (`id_tipo_cliente`, `nombre_tipo`) VALUES (%s, %s)", BASE_TIPOS_CLIENTE)
         cur.executemany("INSERT IGNORE INTO `METODO_PAGO` (`id_metodo_pago`, `codigo_metodo`, `descripcion`, `aplica_comision`) VALUES (%s, %s, %s, %s)", BASE_METODOS_PAGO)
@@ -632,26 +622,21 @@ def setup_masters(conn):
         cur.executemany("INSERT IGNORE INTO `ZONA_TIENDA` (`id_tienda`, `nombre_zona`, `tipo_zona`, `aforo_limite`) VALUES (%s, %s, %s, %s)", ALL_ZONAS)
         cur.executemany("INSERT IGNORE INTO `DISPOSITIVO_SENSOR` (`id_zona`, `codigo_sensor`, `tipo_sensor`, `ip_dispositivo`) VALUES (%s, %s, %s, %s)", ALL_SENSORES)
 
-        # Generación del Padrón de Clientes
-        cur.execute("SELECT COUNT(*) FROM `CLIENTE`;")
-        current_client_count = cur.fetchone()[0]
+        # Generación del Padrón Calibrado de Clientes (3,500 clientes)
+        print(f"  → Generando padrón calibrado de {NUM_CLIENTES:,} clientes con casos de uso ETL...")
+        clients_data = generate_clients_dataset(NUM_CLIENTES)
+        cur.execute("TRUNCATE TABLE `CLIENTE`;")
 
-        if current_client_count < NUM_CLIENTES:
-            print(f"  → Generando padrón ampliado de {NUM_CLIENTES:,} clientes...")
-            clients_data = generate_clients_dataset(NUM_CLIENTES)
-            cur.execute("TRUNCATE TABLE `CLIENTE`;")
+        insert_client_sql = """
+            INSERT INTO `CLIENTE`
+            (`id_tipo_doc`, `numero_documento`, `nombres`, `apellidos`, `email`, `telefono`,
+             `id_tipo_cliente`, `es_titular_tarjeta_ripley`, `puntos_ripley_acumulados`, `fecha_registro`)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        for i in range(0, len(clients_data), 1000):
+            cur.executemany(insert_client_sql, clients_data[i:i + 1000])
 
-            insert_client_sql = """
-                INSERT INTO `CLIENTE`
-                (`id_tipo_doc`, `numero_documento`, `nombres`, `apellidos`, `email`, `telefono`,
-                 `id_tipo_cliente`, `es_titular_tarjeta_ripley`, `puntos_ripley_acumulados`, `fecha_registro`)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """
-            for i in range(0, len(clients_data), 2000):
-                cur.executemany(insert_client_sql, clients_data[i:i + 2000])
-            print(f"  ✓ {len(clients_data):,} clientes registrados exitosamente.")
-
-        # Sincronización de Inventarios en Tienda (3 sedes x 5,000 SKUs = 15,000 registros)
+        # Sincronización de Inventarios en Tienda (3 tiendas x 5,000 SKUs = 15,000 registros)
         print("  → Sincronizando existencias de almacén e inventarios por tienda...")
         cur.execute("TRUNCATE TABLE `INVENTARIO_TIENDA`;")
         cur.execute("SELECT id_tienda FROM `TIENDA`;")
@@ -662,9 +647,9 @@ def setup_masters(conn):
         inventarios = []
         for t_id in tiendas:
             for p_id in productos:
-                stock_piso = random.randint(15, 60)
-                stock_alm = random.randint(30, 200)
-                reorden = random.randint(10, 25)
+                stock_piso = random.randint(15, 50)
+                stock_alm = random.randint(30, 120)
+                reorden = random.randint(10, 20)
                 inventarios.append((t_id, p_id, stock_piso, stock_alm, 0, reorden))
 
         insert_inv_sql = """
@@ -675,20 +660,19 @@ def setup_masters(conn):
         for i in range(0, len(inventarios), 3000):
             cur.executemany(insert_inv_sql, inventarios[i:i + 3000])
 
-        print(f"  ✓ {len(inventarios):,} registros de inventario inicializados.")
-
         cur.execute("SET FOREIGN_KEY_CHECKS = 1;")
 
     conn.commit()
-    print("  ✓ Todos los maestros, catálogos e inventarios están listos.")
+    print("  ✓ Catálogos maestros, productos, clientes e inventarios sincronizados.")
 
 
 def generate_transactions(conn):
     """
-    Genera las transacciones comerciales a gran escala (~50,000 comprobantes).
-    Aplica distribución de Pareto en productos y clientes, horas pico, cálculo SUNAT y lotes masivos.
+    Genera transacciones comerciales para Julio 2026 (31 días).
+    Alcanza ~50,000 líneas en DETALLE_COMPROBANTE y ~23,700 comprobantes.
+    Refleja la caída de conversión en horas pico y la duplicación de tiempos de atención.
     """
-    print(f"\n🛒 Generando transacciones comerciales (objetivo: ~{TARGET_TICKETS:,} comprobantes)...")
+    print(f"\n🛒 Generando transacciones comerciales (objetivo: ~{TARGET_DETALLES:,} detalles / ~{TARGET_TICKETS:,} tickets)...")
 
     with conn.cursor() as cur:
         cur.execute("SELECT id_producto, precio_lista, costo_estandar FROM PRODUCTO WHERE estado='Activo' ORDER BY id_producto;")
@@ -711,10 +695,7 @@ def generate_transactions(conn):
     for e_id, t_id in empleados:
         emp_by_tienda.setdefault(t_id, []).append(e_id)
 
-    # 1. Ponderación Pareto de Productos (Top sellers vs. Long-tail)
-    # Top 10% (500 productos) concentra ~60% de unidades vendidas
-    # Siguiente 25% (1,250 productos) concentra ~25%
-    # 65% restante (3,250 productos) representa compras ocasionales (~15%)
+    # 1. Ponderación Pareto de Productos
     prod_weights = []
     for idx in range(len(products)):
         if idx < 500:
@@ -724,7 +705,6 @@ def generate_transactions(conn):
         else:
             prod_weights.append(random.randint(1, 3))
 
-    # Pre-muestreo vectorizado de productos para máxima velocidad
     total_items_to_sample = int(TARGET_TICKETS * 2.15) + 5000
     sampled_product_pool = random.choices(products, weights=prod_weights, k=total_items_to_sample)
     prod_pool_pointer = 0
@@ -736,11 +716,11 @@ def generate_transactions(conn):
     client_weights = []
     for c_id in client_ids:
         if c_id == 1:
-            client_weights.append(7200)  # ~14.5% Clientes Varios
+            client_weights.append(3600)  # ~15% Clientes Varios (compras rápidas sin registrar)
         elif client_titular_map[c_id]:
-            client_weights.append(random.randint(6, 16))
+            client_weights.append(random.randint(8, 18))
         else:
-            client_weights.append(random.randint(1, 4))
+            client_weights.append(random.randint(2, 5))
 
     precomputed_clients = random.choices(client_ids, weights=client_weights, k=TARGET_TICKETS + 2000)
     client_idx_pointer = 0
@@ -755,7 +735,7 @@ def generate_transactions(conn):
         cur.execute("SET FOREIGN_KEY_CHECKS = 1;")
     conn.commit()
 
-    # 3. Generar Asignaciones de Caja por día y turno
+    # 3. Asignaciones de Caja por día y turno (31 días x 3 tiendas x 4 cajas x 3 turnos = 1,116)
     print("  → Creando sesiones de apertura y cierre de caja (ASIGNACION_CAJA)...")
     curr_date = START_DATE
     asignaciones = []
@@ -793,7 +773,6 @@ def generate_transactions(conn):
         )
     conn.commit()
 
-    # Mapeo indexado de asignaciones
     with conn.cursor() as cur:
         cur.execute("SELECT id_asignacion, id_caja, id_empleado, fecha_operacion, hora_apertura, hora_cierre FROM ASIGNACION_CAJA;")
         asig_rows = cur.fetchall()
@@ -802,10 +781,10 @@ def generate_transactions(conn):
     for asig_id, c_id, e_id, f_op, h_ap, h_ci in asig_rows:
         asig_map.setdefault((c_id, f_op), []).append((asig_id, e_id, h_ap, h_ci))
 
-    print(f"  ✓ {len(asignaciones):,} sesiones de caja generadas.")
+    print(f"  ✓ {len(asignaciones):,} sesiones de caja generadas para el mes de julio.")
 
-    # 4. Planificación de Tickets Diarios
-    base_daily_tickets = int(TARGET_TICKETS / (44 * 0.95 + 18 * 1.45))
+    # 4. Planificación de Tickets Diarios (31 días: 23 días laborables y 8 fines de semana)
+    base_daily_tickets = int(TARGET_TICKETS / (23 * 0.95 + 8 * 1.45))
 
     correlativos = {
         ("Boleta de Venta", "B001"): 100000,
@@ -828,7 +807,7 @@ def generate_transactions(conn):
     chunk_counter = 1
     total_chunks_expected = TARGET_TICKETS // CHUNK_SIZE
 
-    print("  → Generando tickets y detalles en lotes masivos...")
+    print("  → Generando tickets y detalles con distribución horaria continua (10:00 a 22:00)...")
 
     curr_date = START_DATE
     while curr_date <= END_DATE:
@@ -840,22 +819,39 @@ def generate_transactions(conn):
             tienda_id = random.choices(available_tiendas, weights=[50, 30, 20])[0]
             caja_id = random.choice(cajas_by_tienda[tienda_id])
 
+            # DISTRIBUCIÓN HORARIA CONTINUA (Sin huecos, reflejando cuellos de botella):
             rand_val = random.random()
-            if rand_val < 0.65:
+            if rand_val < 0.50:
+                # Hora Pico Noche (18:00 a 20:59): 50% de las ventas del día
                 hora = random.randint(18, 20)
                 minuto = random.randint(0, 59)
                 segundo = random.randint(0, 59)
-                tiempo_atencion = random.randint(110, 320)
-            elif rand_val < 0.85:
+                # Tiempos de atención altos por colas y congestión
+                tiempo_atencion = random.randint(180, 280)
+            elif rand_val < 0.70:
+                # Hora Almuerzo (13:00 a 15:59): 20% de las ventas
                 hora = random.randint(13, 15)
                 minuto = random.randint(0, 59)
                 segundo = random.randint(0, 59)
-                tiempo_atencion = random.randint(80, 200)
-            else:
-                hora = random.choice([10, 11, 12, 21])
+                tiempo_atencion = random.randint(100, 180)
+            elif rand_val < 0.85:
+                # Tarde Regular (16:00 a 17:59): 15% de las ventas (cubre el hueco anterior)
+                hora = random.randint(16, 17)
                 minuto = random.randint(0, 59)
                 segundo = random.randint(0, 59)
-                tiempo_atencion = random.randint(60, 150)
+                tiempo_atencion = random.randint(80, 150)
+            elif rand_val < 0.95:
+                # Valle Mañana (10:00 a 12:59): 10% de las ventas
+                hora = random.randint(10, 12)
+                minuto = random.randint(0, 59)
+                segundo = random.randint(0, 59)
+                tiempo_atencion = random.randint(60, 120)
+            else:
+                # Valle Cierre (21:00 a 21:59): 5% de las ventas
+                hora = 21
+                minuto = random.randint(0, 59)
+                segundo = random.randint(0, 59)
+                tiempo_atencion = random.randint(60, 110)
 
             fecha_hora_emision = datetime(curr_date.year, curr_date.month, curr_date.day, hora, minuto, segundo)
             fecha_hora_inicio = fecha_hora_emision - timedelta(seconds=tiempo_atencion)
@@ -870,11 +866,12 @@ def generate_transactions(conn):
                 else:
                     asig_id, emp_id, _, _ = sessions[0]
 
-            # Inyección de Anomalías ETL
+            # Inyección de Anomalía 1: Outliers de tiempo (0s o >3600s) para justificar columna condicional
             if random.random() < 0.012:
                 anomalias_outliers_tiempo += 1
                 tiempo_atencion = random.choice([0, 3600, 4200])
 
+            # Inyección de Anomalía 2: Estado de transacción (~4.5% Anulado/Devuelto) para justificar filtro
             if random.random() < 0.045:
                 estado = random.choice(["Anulado", "Devuelto"])
                 anomalias_anulados += 1
@@ -890,13 +887,11 @@ def generate_transactions(conn):
             correlativos[(tipo_comp, serie)] += 1
             num_correlativo = correlativos[(tipo_comp, serie)]
 
-            # Canasta de compra (1 a 5 ítems por ticket)
             num_items = random.choices([1, 2, 3, 4, 5], weights=[35, 35, 18, 8, 4])[0]
             ticket_subtotal = 0.0
             ticket_descuento = 0.0
             ticket_detalles = []
 
-            # Obtener ítems del pool muestreado con Pareto
             ticket_prods = []
             seen_pids = set()
             while len(ticket_prods) < num_items:
@@ -939,14 +934,20 @@ def generate_transactions(conn):
 
             detalles_chunk.extend(ticket_detalles)
 
+            # Métodos de Pago y Generación de Nulos Justificados
             if es_titular and random.random() < 0.70:
                 metodo_pago = 1  # Tarjeta Ripley
+                nro_operacion = f"AUTH-{random.randint(100000, 999999)}"
             else:
                 metodo_pago = random.choices([2, 3, 4, 5], weights=[35, 30, 15, 20])[0]
+                if metodo_pago == 4:
+                    # Anomalía ETL 5: Pagos en efectivo NO tienen operación POS (valor NULL justificado)
+                    nro_operacion = None
+                else:
+                    nro_operacion = f"AUTH-{random.randint(100000, 999999)}"
 
             pagos_chunk.append((
-                comp_id_virtual, metodo_pago, monto_total,
-                f"AUTH-{random.randint(100000, 999999)}", fecha_hora_emision
+                comp_id_virtual, metodo_pago, monto_total, nro_operacion, fecha_hora_emision
             ))
 
             comp_id_virtual += 1
@@ -1009,11 +1010,21 @@ def _insert_chunk(conn, comprobantes, detalles, pagos):
 
 
 def generate_iot_telemetry(conn):
-    """Genera lecturas de afluencia IoT sincronizadas para el Drill-Across de horas pico."""
-    print("\n📡 Generando telemetría de afluencia IoT (sensores cada 30 min)...")
+    """
+    Genera lecturas de afluencia IoT sincronizadas para Julio 2026 (31 días).
+    Refleja la caída en la tasa de conversión durante horas pico e inyecta ~0.5% duplicados controlados.
+    """
+    print("\n📡 Generando telemetría de afluencia IoT (sensores cada 30 min para Julio 2026)...")
 
     with conn.cursor() as cur:
-        cur.execute("SELECT id_dispositivo, id_zona FROM DISPOSITIVO_SENSOR WHERE estado='Activo';")
+        cur.execute(
+            """
+            SELECT s.id_dispositivo, s.id_zona, z.id_tienda
+            FROM DISPOSITIVO_SENSOR s
+            JOIN ZONA_TIENDA z ON s.id_zona = z.id_zona
+            WHERE s.estado='Activo';
+            """
+        )
         sensors = cur.fetchall()
 
     if not sensors:
@@ -1025,27 +1036,79 @@ def generate_iot_telemetry(conn):
 
     while curr_date <= END_DATE:
         is_weekend = curr_date.weekday() >= 5
-        base_mult = 1.45 if is_weekend else 1.0
+        base_mult = 1.35 if is_weekend else 1.0
 
-        for sens_id, _ in sensors:
+        for sens_id, _, tienda_id in sensors:
             for h in range(10, 22):
                 for m in [0, 30]:
                     dt = datetime(curr_date.year, curr_date.month, curr_date.day, h, m, 0)
 
-                    if 18 <= h <= 20:
-                        entradas = int(random.randint(220, 380) * base_mult)
-                        salidas = int(random.randint(90, 180) * base_mult)
-                        aforo = int(random.randint(1800, 3200) * base_mult)
-                    elif 13 <= h <= 15:
-                        entradas = int(random.randint(110, 190) * base_mult)
-                        salidas = int(random.randint(95, 160) * base_mult)
-                        aforo = int(random.randint(950, 1800) * base_mult)
+                    # Dinámica de afluencia calibrada por tienda y sensor:
+                    # En horas valle/tarde (10:00 a 17:59), la tasa de conversión ronda el 20-22%.
+                    # En horas pico (18:00 a 20:59), la afluencia se dispara, las cajas se saturan,
+                    # los tiempos de atención se duplican y la conversión cae a ~12-14% (abandono de compra).
+                    if tienda_id == 1:
+                        # Tienda 1: Jockey Plaza (3 sensores, 50% de las ventas totales)
+                        if 18 <= h <= 20:
+                            entradas = int(random.randint(72, 88) * base_mult)
+                            salidas = int(random.randint(40, 60) * base_mult)
+                            aforo = int(random.randint(900, 1500) * base_mult)
+                        elif 13 <= h <= 17:
+                            entradas = int(random.randint(18, 26) * base_mult)
+                            salidas = int(random.randint(15, 24) * base_mult)
+                            aforo = int(random.randint(350, 600) * base_mult)
+                        elif 10 <= h <= 12:
+                            entradas = int(random.randint(9, 14) * base_mult)
+                            salidas = int(random.randint(7, 12) * base_mult)
+                            aforo = int(random.randint(150, 300) * base_mult)
+                        else:  # 21:00 Cierre
+                            entradas = int(random.randint(8, 13) * base_mult)
+                            salidas = int(random.randint(22, 36) * base_mult)
+                            aforo = int(random.randint(80, 180) * base_mult)
+
+                    elif tienda_id == 2:
+                        # Tienda 2: San Miguel (2 sensores, 30% de las ventas totales)
+                        if 18 <= h <= 20:
+                            entradas = int(random.randint(64, 78) * base_mult)
+                            salidas = int(random.randint(35, 55) * base_mult)
+                            aforo = int(random.randint(650, 1100) * base_mult)
+                        elif 13 <= h <= 17:
+                            entradas = int(random.randint(16, 23) * base_mult)
+                            salidas = int(random.randint(14, 21) * base_mult)
+                            aforo = int(random.randint(250, 480) * base_mult)
+                        elif 10 <= h <= 12:
+                            entradas = int(random.randint(8, 12) * base_mult)
+                            salidas = int(random.randint(6, 11) * base_mult)
+                            aforo = int(random.randint(120, 240) * base_mult)
+                        else:  # Cierre
+                            entradas = int(random.randint(7, 11) * base_mult)
+                            salidas = int(random.randint(18, 30) * base_mult)
+                            aforo = int(random.randint(60, 140) * base_mult)
+
                     else:
-                        entradas = int(random.randint(40, 95) * base_mult)
-                        salidas = int(random.randint(35, 90) * base_mult)
-                        aforo = int(random.randint(400, 950) * base_mult)
+                        # Tienda 3: Mall Aventura Arequipa (2 sensores, 20% de las ventas totales)
+                        if 18 <= h <= 20:
+                            entradas = int(random.randint(42, 54) * base_mult)
+                            salidas = int(random.randint(25, 40) * base_mult)
+                            aforo = int(random.randint(450, 800) * base_mult)
+                        elif 13 <= h <= 17:
+                            entradas = int(random.randint(10, 15) * base_mult)
+                            salidas = int(random.randint(8, 14) * base_mult)
+                            aforo = int(random.randint(180, 350) * base_mult)
+                        elif 10 <= h <= 12:
+                            entradas = int(random.randint(5, 8) * base_mult)
+                            salidas = int(random.randint(4, 7) * base_mult)
+                            aforo = int(random.randint(80, 160) * base_mult)
+                        else:  # Cierre
+                            entradas = int(random.randint(4, 7) * base_mult)
+                            salidas = int(random.randint(12, 22) * base_mult)
+                            aforo = int(random.randint(40, 100) * base_mult)
 
                     iot_batch.append((sens_id, dt, entradas, salidas, aforo))
+
+                    # Anomalía ETL 6: Inyección controlada de duplicados (~0.5%) por reintentos de red
+                    if random.random() < 0.005:
+                        iot_batch.append((sens_id, dt, entradas, salidas, aforo))
 
         curr_date += timedelta(days=1)
 
@@ -1066,16 +1129,17 @@ def generate_iot_telemetry(conn):
             )
 
     conn.commit()
-    print(f"  ✓ {len(iot_batch):,} lecturas de telemetría IoT insertadas exitosamente.")
+    print(f"  ✓ {len(iot_batch):,} lecturas de telemetría IoT insertadas exitosamente (incluye duplicados controlados).")
 
 
 def main():
     print("=" * 70)
     print("🚀 GENERADOR MASIVO DE DATOS OLTP - RIPLEY BUSINESS INTELLIGENCE")
-    print(f"🎯 Meta Comprobantes: ~{TARGET_TICKETS:,} tickets")
-    print(f"📦 Catálogo de Productos: ~{TARGET_PRODUCTS:,} SKUs")
-    print(f"👥 Padrón de Clientes: ~{NUM_CLIENTES:,} registros")
-    print(f"📅 Rango de Fechas: {START_DATE.strftime('%Y-%m-%d')} a {END_DATE.strftime('%Y-%m-%d')} (62 días)")
+    print(f"📅 Rango de Fechas: {START_DATE.strftime('%Y-%m-%d')} a {END_DATE.strftime('%Y-%m-%d')} (31 días - Campaña)")
+    print(f"🎯 Meta: ~{TARGET_DETALLES:,} filas en DETALLE_COMPROBANTE")
+    print(f"🧾 Comprobantes Estimados: ~{TARGET_TICKETS:,} tickets")
+    print(f"📦 Catálogo de Productos: {TARGET_PRODUCTS:,} SKUs")
+    print(f"👥 Padrón de Clientes: {NUM_CLIENTES:,} registros")
     print("=" * 70)
 
     try:
@@ -1090,16 +1154,6 @@ def main():
         generate_iot_telemetry(conn)
 
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM `LINEA_COMERCIAL`;")
-            total_lineas = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM `CATEGORIA`;")
-            total_categorias = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM `SUBCATEGORIA`;")
-            total_subcategorias = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM `MARCA`;")
-            total_marcas = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM `PROVEEDOR`;")
-            total_proveedores = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM `PRODUCTO`;")
             total_productos = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM `INVENTARIO_TIENDA`;")
@@ -1110,21 +1164,22 @@ def main():
             total_tickets = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM `DETALLE_COMPROBANTE`;")
             total_detalles = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM `PAGO_COMPROBANTE`;")
+            total_pagos = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM `LOG_AFLUENCIA_IOT`;")
             total_iot = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM `ASIGNACION_CAJA`;")
+            total_asig = cur.fetchone()[0]
 
         print("\n" + "=" * 70)
         print("🎉 GENERACIÓN Y CARGA MASIVA COMPLETADA CON ÉXITO")
-        print(f"  🏢 Líneas Comerciales:              {total_lineas}")
-        print(f"  📂 Categorías de Producto:          {total_categorias}")
-        print(f"  🏷️  Subcategorías:                   {total_subcategorias}")
-        print(f"  🏷️  Marcas (Propias y Externas):     {total_marcas}")
-        print(f"  🏭 Proveedores Homologados:         {total_proveedores}")
         print(f"  📦 Catálogo Total PRODUCTO:         {total_productos:,}")
         print(f"  🏬 Registros INVENTARIO_TIENDA:     {total_inventario:,}")
         print(f"  👥 Total CLIENTE:                   {total_clientes:,}")
         print(f"  🧾 Total COMPROBANTE_PAGO:          {total_tickets:,}")
         print(f"  🛒 Total DETALLE_COMPROBANTE:       {total_detalles:,}")
+        print(f"  💳 Total PAGO_COMPROBANTE:          {total_pagos:,}")
+        print(f"  🕒 Total ASIGNACION_CAJA:           {total_asig:,}")
         print(f"  📡 Total LOG_AFLUENCIA_IOT:         {total_iot:,}")
         print("=" * 70)
 
